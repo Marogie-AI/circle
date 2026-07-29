@@ -1,0 +1,14 @@
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: circle
+      POSTGRES_USER: circle
+      POSTGRES_PASSWORD: circle
+    ports:
+      - "5434:5432"
+    volumes:
+      - circle-pgdata:/var/lib/postgresql/data
+
+volumes:
+  circle-pgdata:
