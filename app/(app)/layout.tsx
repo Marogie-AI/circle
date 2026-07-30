@@ -1,7 +1,10 @@
 import { headers } from "next/headers";
 import { AppSidebar } from "@/components/app-sidebar";
+import { MobileNav } from "@/components/mobile-nav";
+import { CommandPalette } from "@/components/command-palette";
 import { auth } from "@/lib/auth";
 import { listGroupsForUser, listTagFacets } from "@/lib/queries/groups";
+import { unreadCounts } from "@/lib/queries/reads";
 
 // SECURITY: this layout is CHROME ONLY. It is not an authorization boundary.
 // Rendering the sidebar for a signed-in user says nothing about which groups they
@@ -19,7 +22,10 @@ export default async function AppLayout({
   // Signed out (e.g. the landing page at "/") renders bare, without app chrome.
   if (!session) return <>{children}</>;
 
-  const groups = await listGroupsForUser(session.user.id);
+  const [groups, unread] = await Promise.all([
+    listGroupsForUser(session.user.id),
+    unreadCounts(session.user.id),
+  ]);
 
   // Slug comes from the header proxy.ts forwards, so tag facets are fetched for the
   // open group only. Cross-checked against the user's own memberships below, so a
@@ -32,10 +38,21 @@ export default async function AppLayout({
     : undefined;
   const tags = activeGroup ? await listTagFacets(activeGroup.id) : [];
 
+  const sidebar = {
+    groups,
+    user: session.user,
+    tags,
+    unread: Object.fromEntries(unread),
+  };
+
   return (
-    <div className="flex min-h-screen w-full bg-neutral-100">
-      <AppSidebar groups={groups} user={session.user} tags={tags} />
-      <div className="min-w-0 flex-1 bg-neutral-50">{children}</div>
+    <div className="flex min-h-screen w-full bg-rail">
+      <AppSidebar {...sidebar} />
+      <div className="flex min-w-0 flex-1 flex-col bg-canvas">
+        <MobileNav {...sidebar} />
+        {children}
+      </div>
+      <CommandPalette groups={groups} />
     </div>
   );
 }

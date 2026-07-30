@@ -1,15 +1,29 @@
 import Link from "next/link";
 import { PageHeader, buttonStyles } from "@/components/page-header";
-import { ClearIcon, CommentIcon, InviteIcon, PlusIcon, ReactionIcon } from "@/components/icons";
+import {
+  ClearIcon,
+  CommentIcon,
+  InviteIcon,
+  PlusIcon,
+  ReactionIcon,
+  SearchIcon,
+} from "@/components/icons";
+import { MarkSeen } from "@/components/mark-seen";
+import { SaveButton } from "@/components/save-button";
 import { getFeedPage } from "@/lib/queries/feed";
 import { countMembers } from "@/lib/queries/groups";
+import { getLastSeen, markGroupSeen } from "@/lib/queries/reads";
+import { savedIdsFor } from "@/lib/queries/saved";
+import { searchGroupPosts } from "@/lib/queries/search";
 import { requireMember } from "@/lib/guard";
+import { toggleSaved } from "@/app/(app)/saved/actions";
 
 type GroupPageProps = {
   params: Promise<{ slug: string }>;
   searchParams: Promise<{
     tag?: string | string[];
     before?: string | string[];
+    q?: string | string[];
   }>;
 };
 
@@ -29,26 +43,56 @@ function postDate(date: Date) {
   });
 }
 
-export default async function GroupPage({
-  params,
-  searchParams,
-}: GroupPageProps) {
+export default async function GroupPage({ params, searchParams }: GroupPageProps) {
   const { slug } = await params;
   const { group, user } = await requireMember(slug);
   const query = await searchParams;
   const tag = first(query.tag)?.trim() || null;
   const before = first(query.before) || null;
-  const [feed, memberCount] = await Promise.all([
-    getFeedPage({ groupId: group.id, tag, cursor: before }),
+  const q = first(query.q)?.trim() || null;
+
+  const [memberCount, lastSeen] = await Promise.all([
     countMembers(group.id),
+    getLastSeen(group.id, user.id),
   ]);
+
+  // Searching replaces the feed; the two never combine, so the empty states can be
+  // specific about which one you're looking at.
+  const searchHits = q ? await searchGroupPosts({ groupId: group.id, query: q }) : null;
+  const feed = q
+    ? null
+    : await getFeedPage({ groupId: group.id, tag, cursor: before });
+
+  const rows = q
+    ? (searchHits ?? []).map((hit) => ({
+        id: hit.id,
+        title: hit.title,
+        tags: hit.tags,
+        createdAt: new Date(hit.createdAt),
+        authorName: hit.authorName,
+        commentCount: 0,
+        reactionCount: 0,
+        ogImage: null as string | null,
+      }))
+    : (feed?.items ?? []);
+
+  const savedIds = await savedIdsFor(user.id, rows.map((r) => r.id));
+
   const loadMoreParams = new URLSearchParams();
   if (tag) loadMoreParams.set("tag", tag);
-  if (feed.nextCursor) loadMoreParams.set("before", feed.nextCursor);
+  if (feed?.nextCursor) loadMoreParams.set("before", feed.nextCursor);
 
   return (
     <main className="min-h-screen w-full px-6 py-10 sm:px-10 sm:py-12">
-      {/* one header, one action group — brand + identity live in the sidebar */}
+      {/* clears the unread badge only after this render has painted */}
+      <MarkSeen
+        mark={async () => {
+          "use server";
+          const { group: g, user: u } = await requireMember(slug);
+          await markGroupSeen(g.id, u.id);
+        }}
+      />
+
       <PageHeader
         eyebrow="Private group"
         title={group.name}
@@ -56,12 +100,12 @@ export default async function GroupPage({
           <>
             <span>{memberCount === 1 ? "1 member" : `${memberCount} members`}</span>
             {tag ? (
-              <span className="inline-flex items-center gap-1.5 rounded-full bg-neutral-900 px-2.5 py-0.5 text-xs font-medium text-white">
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-inverse px-2.5 py-0.5 text-xs font-medium text-inverse-ink">
                 #{tag}
                 <Link
                   href={`/groups/${slug}`}
                   aria-label={`Clear the ${tag} filter`}
-                  className="rounded-full text-neutral-400 transition hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
+                  className="rounded-full text-faint transition hover:text-inverse-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
                 >
                   <ClearIcon size={13} />
                 </Link>
@@ -73,7 +117,7 @@ export default async function GroupPage({
           <>
             <Link href={`/groups/${slug}/settings`} className={`${buttonStyles.secondary} gap-1.5`}>
               <InviteIcon size={16} />
-              Invite people
+              <span className="hidden sm:inline">Invite people</span>
             </Link>
             <Link href={`/groups/${slug}/new`} className={`${buttonStyles.primary} gap-1.5`}>
               <PlusIcon size={16} />
@@ -83,103 +127,161 @@ export default async function GroupPage({
         }
       />
 
-      <section className="pb-10">
+      <form method="get" className="mt-6 flex items-center gap-2">
+        <div className="relative min-w-0 flex-1 sm:max-w-sm">
+          <SearchIcon
+            size={16}
+            className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-faint"
+          />
+          <input
+            type="search"
+            name="q"
+            defaultValue={q ?? ""}
+            placeholder={`Search ${group.name}…`}
+            className="w-full rounded-lg border border-line bg-surface py-2 pl-9 pr-3 text-sm outline-none transition placeholder:text-faint focus:border-inverse focus:ring-2 focus:ring-inverse/10"
+          />
+        </div>
+        {q ? (
+          <Link href={`/groups/${slug}`} className={buttonStyles.secondary}>
+            Clear
+          </Link>
+        ) : null}
+      </form>
 
-        {feed.items.length ? (
-          <div className="mt-8 overflow-hidden rounded-2xl border border-neutral-200 bg-white shadow-sm">
-            {/* F5 aligned table. min-w forces horizontal scroll rather than squashing
-                columns on narrow screens; table-fixed + truncate keeps long titles
-                from widening the layout. */}
+      <section className="pb-10">
+        {rows.length ? (
+          <div className="mt-6 overflow-hidden rounded-2xl border border-line bg-surface shadow-sm">
             <div className="min-w-0 overflow-x-auto">
               <table className="w-full min-w-[720px] table-fixed border-collapse text-left text-sm">
-                <thead className="border-b border-neutral-200 text-xs font-medium uppercase tracking-wide text-neutral-400">
+                <thead className="border-b border-line text-xs font-medium uppercase tracking-wide text-muted">
                   <tr>
-                    <th scope="col" className="w-[42%] px-5 py-3 font-medium">Title</th>
-                    <th scope="col" className="w-[21%] px-3 py-3 font-medium">Tags</th>
+                    <th scope="col" className="w-[44%] px-5 py-3 font-medium">Title</th>
+                    <th scope="col" className="w-[19%] px-3 py-3 font-medium">Tags</th>
                     <th scope="col" className="w-[12%] px-3 py-3 font-medium">Author</th>
                     <th scope="col" className="w-[9%] px-3 py-3 font-medium">When</th>
                     <th scope="col" className="w-[16%] px-5 py-3 text-right font-medium">Counts</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-neutral-100">
-                  {feed.items.map((post) => (
-                    <tr key={post.id} className="group align-middle transition hover:bg-neutral-50">
-                      <td className="px-5 py-4">
-                        <Link
-                          href={`/groups/${slug}/p/${post.id}`}
-                          title={post.title}
-                          className="block truncate font-medium text-neutral-900 underline-offset-4 group-hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-900 focus-visible:ring-offset-2"
-                        >
-                          {post.title}
-                        </Link>
-                      </td>
-                      <td className="px-3 py-4">
-                        <div className="flex min-w-0 flex-wrap gap-1">
-                          {post.tags.map((postTag) => (
+                <tbody className="divide-y divide-hairline">
+                  {rows.map((post) => {
+                    const isNew =
+                      !q &&
+                      post.authorName !== (user.name ?? "") &&
+                      (!lastSeen || post.createdAt > lastSeen);
+                    return (
+                      <tr key={post.id} className="group align-middle transition hover:bg-hover">
+                        <td className="px-5 py-4">
+                          <div className="flex min-w-0 items-center gap-2.5">
+                            <span
+                              aria-hidden={!isNew}
+                              title={isNew ? "New since your last visit" : undefined}
+                              className={`size-1.5 shrink-0 rounded-full ${isNew ? "bg-inverse" : "bg-transparent"}`}
+                            />
+                            {post.ogImage ? (
+                              // eslint-disable-next-line @next/next/no-img-element
+                              <img
+                                src={post.ogImage}
+                                alt=""
+                                loading="lazy"
+                                referrerPolicy="no-referrer"
+                                className="hidden size-9 shrink-0 rounded-md object-cover sm:block"
+                              />
+                            ) : null}
                             <Link
-                              key={postTag}
-                              href={`/groups/${slug}?tag=${encodeURIComponent(postTag)}`}
-                              className="max-w-full truncate rounded-full bg-neutral-100 px-2 py-0.5 text-xs font-medium text-neutral-600 transition hover:bg-neutral-200 hover:text-neutral-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-900 focus-visible:ring-offset-2"
+                              href={`/groups/${slug}/p/${post.id}`}
+                              title={post.title}
+                              className="block min-w-0 flex-1 truncate font-medium text-ink underline-offset-4 group-hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inverse focus-visible:ring-offset-2"
                             >
-                              #{postTag}
+                              {post.title}
                             </Link>
-                          ))}
-                        </div>
-                      </td>
-                      <td className="truncate px-3 py-4 text-neutral-500">{post.authorName}</td>
-                      <td className="whitespace-nowrap px-3 py-4 text-neutral-500">{postDate(post.createdAt)}</td>
-                      <td className="whitespace-nowrap px-5 py-4 text-right text-neutral-500">
-                        {/* glyphs carry the meaning; the title attribute spells it out */}
-                        <span
-                          className="tabular-nums"
-                          title={`${post.commentCount} ${post.commentCount === 1 ? "comment" : "comments"}, ${post.reactionCount} ${post.reactionCount === 1 ? "reaction" : "reactions"}`}
-                        >
-                          <span className={`inline-flex items-center gap-1 ${post.commentCount ? "text-neutral-600" : "text-neutral-300"}`}>
-                            <CommentIcon size={14} /> {post.commentCount}
+                          </div>
+                        </td>
+                        <td className="px-3 py-4">
+                          <div className="flex min-w-0 flex-wrap gap-1">
+                            {post.tags.map((postTag) => (
+                              <Link
+                                key={postTag}
+                                href={`/groups/${slug}?tag=${encodeURIComponent(postTag)}`}
+                                className="max-w-full truncate rounded-full bg-rail px-2 py-0.5 text-xs font-medium text-muted transition hover:bg-hover hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inverse focus-visible:ring-offset-2"
+                              >
+                                #{postTag}
+                              </Link>
+                            ))}
+                          </div>
+                        </td>
+                        <td className="truncate px-3 py-4 text-muted">{post.authorName}</td>
+                        <td className="whitespace-nowrap px-3 py-4 text-muted">
+                          {postDate(post.createdAt)}
+                        </td>
+                        <td className="whitespace-nowrap px-5 py-4 text-right text-muted">
+                          <span className="inline-flex items-center gap-2.5">
+                            {!q ? (
+                              <span className="tabular-nums">
+                                <span className={`inline-flex items-center gap-1 ${post.commentCount ? "text-muted" : "text-faint"}`}>
+                                  <CommentIcon size={14} /> {post.commentCount}
+                                </span>
+                                <span className="mx-2 text-faint">·</span>
+                                <span className={`inline-flex items-center gap-1 ${post.reactionCount ? "text-muted" : "text-faint"}`}>
+                                  <ReactionIcon size={14} /> {post.reactionCount}
+                                </span>
+                              </span>
+                            ) : null}
+                            <SaveButton
+                              saved={savedIds.has(post.id)}
+                              onToggle={async () => {
+                                "use server";
+                                await toggleSaved(slug, post.id);
+                              }}
+                            />
                           </span>
-                          <span className="mx-2.5 text-neutral-200">·</span>
-                          <span className={`inline-flex items-center gap-1 ${post.reactionCount ? "text-neutral-600" : "text-neutral-300"}`}>
-                            <ReactionIcon size={14} /> {post.reactionCount}
-                          </span>
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
 
-            {feed.hasMore && feed.nextCursor ? (
-              <div className="border-t border-neutral-100 px-5 py-4 text-center">
+            {feed?.hasMore && feed.nextCursor ? (
+              <div className="border-t border-hairline px-5 py-4 text-center">
                 <Link
                   href={`/groups/${slug}?${loadMoreParams.toString()}`}
-                  className="inline-flex rounded-lg border border-neutral-300 bg-white px-4 py-2.5 text-sm font-medium text-neutral-700 transition hover:bg-neutral-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-900 focus-visible:ring-offset-2"
+                  className={buttonStyles.secondary}
                 >
                   Load more
                 </Link>
               </div>
             ) : null}
           </div>
-        ) : tag ? (
-          <div className="mt-8 rounded-2xl border border-dashed border-neutral-300 bg-neutral-50 px-6 py-12 text-center">
-            <h2 className="font-semibold tracking-tight text-neutral-900">Nothing tagged #{tag} yet</h2>
-            <p className="mt-2 text-sm text-neutral-500">Try the full feed to see what your group has shared.</p>
-            <Link href={`/groups/${slug}`} className="mt-5 inline-flex rounded-lg border border-neutral-300 bg-white px-4 py-2.5 text-sm font-medium text-neutral-700 hover:bg-neutral-50">
-              Clear filter
-            </Link>
-          </div>
-        ) : before ? (
-          <div className="mt-8 rounded-2xl border border-dashed border-neutral-300 bg-neutral-50 px-6 py-12 text-center">
-            <h2 className="font-semibold tracking-tight text-neutral-900">You’ve reached the end</h2>
-            <Link href={`/groups/${slug}`} className="mt-5 inline-flex text-sm font-medium text-neutral-900 underline-offset-4 hover:underline">Back to latest posts</Link>
-          </div>
         ) : (
-          <div className="mt-8 rounded-2xl border border-dashed border-neutral-300 bg-neutral-50 px-6 py-12 text-center">
-            <h2 className="text-lg font-semibold tracking-tight text-neutral-900">Share the first useful thing</h2>
-            <p className="mx-auto mt-2 max-w-md text-sm text-neutral-500">Start with a link or note, then invite friends to build this circle together.</p>
-            <div className="mt-6 flex flex-wrap justify-center gap-3">
-              <Link href={`/groups/${slug}/new`} className="rounded-lg bg-neutral-900 px-4 py-2.5 text-sm font-medium text-white hover:bg-neutral-700">New post</Link>
-              <Link href={`/groups/${slug}/settings`} className="rounded-lg border border-neutral-300 bg-white px-4 py-2.5 text-sm font-medium text-neutral-700 hover:bg-neutral-50">Invite people</Link>
+          <div className="mt-6 rounded-2xl border border-dashed border-line bg-surface px-6 py-14 text-center">
+            <h2 className="font-semibold tracking-tight text-ink">
+              {q
+                ? `No results for “${q}”`
+                : tag
+                  ? `Nothing tagged #${tag} yet`
+                  : before
+                    ? "You've reached the end"
+                    : "No posts yet"}
+            </h2>
+            <p className="mx-auto mt-2 max-w-sm text-sm text-muted">
+              {q
+                ? "Try fewer or different words."
+                : tag
+                  ? "Clear the filter to see everything your group has shared."
+                  : "Share the first link, note or bit of advice with your circle."}
+            </p>
+            <div className="mt-5 flex justify-center gap-2">
+              {q || tag || before ? (
+                <Link href={`/groups/${slug}`} className={buttonStyles.secondary}>
+                  Back to the feed
+                </Link>
+              ) : null}
+              {!q && !tag ? (
+                <Link href={`/groups/${slug}/new`} className={buttonStyles.primary}>
+                  New post
+                </Link>
+              ) : null}
             </div>
           </div>
         )}

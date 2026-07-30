@@ -17,7 +17,7 @@ export function Avatar({
   return (
     <span
       aria-hidden="true"
-      className={`flex shrink-0 items-center justify-center rounded-full bg-neutral-900 font-semibold text-white ${SIZES[size]} ${className}`}
+      className={`flex shrink-0 items-center justify-center rounded-full bg-inverse font-semibold text-inverse-ink ${SIZES[size]} ${className}`}
     >
       {name.trim().charAt(0).toUpperCase() || "?"}
     </span>
@@ -39,7 +39,7 @@ export function AvatarStack({ names, max = 4 }: { names: string[]; max?: number 
         />
       ))}
       {extra > 0 ? (
-        <span className="ml-1.5 text-xs text-neutral-500">+{extra}</span>
+        <span className="ml-1.5 text-xs text-muted">+{extra}</span>
       ) : null}
     </span>
   );

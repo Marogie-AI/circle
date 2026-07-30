@@ -24,21 +24,21 @@ export default async function SettingsPage() {
       />
 
       <div className="grid max-w-4xl gap-6 pt-8 md:grid-cols-2">
-        <section className="h-fit rounded-2xl border border-neutral-200 bg-white p-6 shadow-sm">
-          <h2 className="text-base font-semibold tracking-tight text-neutral-900">
+        <section className="h-fit rounded-2xl border border-line bg-surface p-6 shadow-sm">
+          <h2 className="text-base font-semibold tracking-tight text-ink">
             Profile
           </h2>
-          <p className="mt-1 text-sm text-neutral-500">
+          <p className="mt-1 text-sm text-muted">
             How you appear to everyone in your groups.
           </p>
           <DisplayNameForm initialName={session.user.name ?? ""} />
         </section>
 
-        <section className="h-fit rounded-2xl border border-neutral-200 bg-white p-6 shadow-sm">
-          <h2 className="text-base font-semibold tracking-tight text-neutral-900">
+        <section className="h-fit rounded-2xl border border-line bg-surface p-6 shadow-sm">
+          <h2 className="text-base font-semibold tracking-tight text-ink">
             Password
           </h2>
-          <p className="mt-1 text-sm text-neutral-500">
+          <p className="mt-1 text-sm text-muted">
             Your email stays {session.user.email}. Changing it isn’t supported yet.
           </p>
           <PasswordForm />

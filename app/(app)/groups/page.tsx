@@ -31,15 +31,15 @@ export default async function GroupsPage() {
                 <li key={group.id}>
                   <Link
                     href={`/groups/${group.slug}`}
-                    className="group flex h-full flex-col rounded-2xl border border-neutral-200 bg-white p-5 shadow-sm transition hover:border-neutral-300 hover:shadow focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-900 focus-visible:ring-offset-2"
+                    className="group flex h-full flex-col rounded-2xl border border-line bg-surface p-5 shadow-sm transition hover:border-line hover:shadow focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inverse focus-visible:ring-offset-2"
                   >
-                    <span className="flex size-9 items-center justify-center rounded-xl bg-neutral-900 text-white">
+                    <span className="flex size-9 items-center justify-center rounded-xl bg-inverse text-inverse-ink">
                       <GroupIcon size={18} />
                     </span>
-                    <h2 className="mt-4 truncate font-semibold tracking-tight text-neutral-900 group-hover:underline group-hover:underline-offset-4">
+                    <h2 className="mt-4 truncate font-semibold tracking-tight text-ink group-hover:underline group-hover:underline-offset-4">
                       {group.name}
                     </h2>
-                    <p className="mt-1 text-xs font-medium uppercase tracking-wide text-neutral-400">
+                    <p className="mt-1 text-xs font-medium uppercase tracking-wide text-faint">
                       {group.role}
                     </p>
                   </Link>
@@ -47,14 +47,14 @@ export default async function GroupsPage() {
               ))}
             </ul>
           ) : (
-            <div className="rounded-2xl border border-dashed border-neutral-300 bg-white px-6 py-14 text-center">
-              <span className="mx-auto flex size-11 items-center justify-center rounded-2xl bg-neutral-100 text-neutral-500">
+            <div className="rounded-2xl border border-dashed border-line bg-surface px-6 py-14 text-center">
+              <span className="mx-auto flex size-11 items-center justify-center rounded-2xl bg-rail text-muted">
                 <GroupIcon size={22} />
               </span>
-              <h2 className="mt-4 font-semibold tracking-tight text-neutral-900">
+              <h2 className="mt-4 font-semibold tracking-tight text-ink">
                 No groups yet
               </h2>
-              <p className="mx-auto mt-2 max-w-sm text-sm text-neutral-500">
+              <p className="mx-auto mt-2 max-w-sm text-sm text-muted">
                 Create one for the links, notes, and conversations you want to keep
                 close — then invite your people with a link.
               </p>
@@ -62,18 +62,18 @@ export default async function GroupsPage() {
           )}
         </section>
 
-        <aside className="h-fit rounded-2xl border border-neutral-200 bg-white p-6 shadow-sm">
-          <h2 className="text-base font-semibold tracking-tight text-neutral-900">
+        <aside className="h-fit rounded-2xl border border-line bg-surface p-6 shadow-sm">
+          <h2 className="text-base font-semibold tracking-tight text-ink">
             New group
           </h2>
-          <p className="mt-1 text-sm text-neutral-500">
+          <p className="mt-1 text-sm text-muted">
             You’ll be the owner. Invite friends with a link afterwards.
           </p>
           <form action={createGroup} className="mt-5 space-y-4">
             <div>
               <label
                 htmlFor="group-name"
-                className="mb-1.5 block text-sm font-medium text-neutral-900"
+                className="mb-1.5 block text-sm font-medium text-ink"
               >
                 Group name
               </label>
@@ -85,12 +85,12 @@ export default async function GroupsPage() {
                 minLength={1}
                 maxLength={60}
                 placeholder="Weekend readers"
-                className="w-full rounded-lg border border-neutral-300 bg-white px-3 py-2.5 text-sm outline-none transition placeholder:text-neutral-400 focus:border-neutral-900 focus:ring-2 focus:ring-neutral-900/10"
+                className="w-full rounded-lg border border-line bg-surface px-3 py-2.5 text-sm outline-none transition placeholder:text-faint focus:border-inverse focus:ring-2 focus:ring-inverse/10"
               />
             </div>
             <button
               type="submit"
-              className="inline-flex w-full items-center justify-center gap-1.5 rounded-lg bg-neutral-900 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-neutral-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-900 focus-visible:ring-offset-2"
+              className="inline-flex w-full items-center justify-center gap-1.5 rounded-lg bg-inverse px-4 py-2.5 text-sm font-medium text-inverse-ink transition hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inverse focus-visible:ring-offset-2"
             >
               <PlusIcon size={16} />
               Create group

@@ -33,7 +33,7 @@ export function CopyButton({ value }: CopyButtonProps) {
     <button
       type="button"
       onClick={copy}
-      className="shrink-0 rounded-lg border border-neutral-300 bg-white px-3 py-2 text-sm font-medium text-neutral-700 transition hover:bg-neutral-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-900 focus-visible:ring-offset-2"
+      className="shrink-0 rounded-lg border border-line bg-surface px-3 py-2 text-sm font-medium text-ink transition hover:bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inverse focus-visible:ring-offset-2"
       aria-live="polite"
     >
       {copied ? "Copied" : "Copy"}
