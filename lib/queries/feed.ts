@@ -80,6 +80,7 @@ export async function getFeedPage({
       tags: posts.tags,
       createdAt: posts.createdAt,
       authorName: user.name,
+      ogImage: posts.ogImage,
     })
     .from(posts)
     .innerJoin(user, eq(user.id, posts.authorId))
