@@ -70,6 +70,13 @@ export const posts = pgTable(
     body: text("body").notNull(),
     url: text("url"),
     tags: text("tags").array().notNull().default([]),
+    // Open Graph metadata for the link card. Nullable: a preview is best-effort and
+    // must never block or fail posting. ogFetchedAt records that we tried.
+    ogTitle: text("og_title"),
+    ogDescription: text("og_description"),
+    ogImage: text("og_image"),
+    ogSite: text("og_site"),
+    ogFetchedAt: timestamp("og_fetched_at"),
     createdAt: timestamp("created_at").notNull().defaultNow(),
     updatedAt: timestamp("updated_at").notNull().defaultNow(),
   },
@@ -118,5 +125,41 @@ export const reactions = pgTable(
   },
   (table) => [
     primaryKey({ columns: [table.postId, table.userId, table.emoji] }),
+  ],
+);
+
+/** Per-member "I have seen this group up to here", drives the unread badges. */
+export const groupReads = pgTable(
+  "group_reads",
+  {
+    groupId: uuid("group_id")
+      .notNull()
+      .references(() => groups.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    lastSeenAt: timestamp("last_seen_at").notNull().defaultNow(),
+  },
+  (table) => [primaryKey({ columns: [table.groupId, table.userId] })],
+);
+
+/**
+ * Personal bookmarks. Note the read path must always re-join memberships: a row here
+ * outliving the user's membership must NOT keep the post visible in /saved.
+ */
+export const savedPosts = pgTable(
+  "saved_posts",
+  {
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    postId: uuid("post_id")
+      .notNull()
+      .references(() => posts.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.userId, table.postId] }),
+    index("saved_posts_user_idx").on(table.userId, desc(table.createdAt)),
   ],
 );
