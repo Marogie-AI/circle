@@ -1,13 +1,23 @@
 "use client";
 
 import { useActionState, useState } from "react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
+import dynamic from "next/dynamic";
 import {
   createPost,
   updatePost,
   type PostActionState,
 } from "@/app/(app)/groups/[slug]/actions";
+
+// Lazy: keeps ~144 KB of markdown machinery out of the initial compose payload. It
+// arrives on first Preview click. ssr:false because there is nothing to prerender —
+// the body only exists in client state.
+const MarkdownPreview = dynamic(
+  () => import("@/components/markdown-preview").then((m) => m.MarkdownPreview),
+  {
+    ssr: false,
+    loading: () => <p className="text-sm text-faint">Loading preview…</p>,
+  },
+);
 
 const initialState: PostActionState = { error: null };
 
@@ -107,26 +117,7 @@ export function PostForm({ slug, post }: { slug: string; post?: PostDraft }) {
 
         {tab === "preview" ? (
           <div className="min-h-[22rem] rounded-lg border border-line bg-surface px-4 py-3 text-[0.95rem] leading-7 text-ink">
-            {body.trim() ? (
-              // same renderer as the post page, and deliberately still no rehype-raw
-              <ReactMarkdown
-                remarkPlugins={[remarkGfm]}
-                components={{
-                  h1: ({ children }) => <h2 className="mb-2 mt-5 text-xl font-semibold text-ink">{children}</h2>,
-                  h2: ({ children }) => <h2 className="mb-2 mt-5 text-lg font-semibold text-ink">{children}</h2>,
-                  p: ({ children }) => <p className="my-3">{children}</p>,
-                  a: ({ children, href }) => <a href={href} target="_blank" rel="noopener noreferrer" className="font-medium text-ink underline underline-offset-4">{children}</a>,
-                  ul: ({ children }) => <ul className="my-3 list-disc space-y-1 pl-6">{children}</ul>,
-                  ol: ({ children }) => <ol className="my-3 list-decimal space-y-1 pl-6">{children}</ol>,
-                  code: ({ children }) => <code className="rounded bg-rail px-1.5 py-0.5 text-sm">{children}</code>,
-                  blockquote: ({ children }) => <blockquote className="my-4 border-l-2 border-line pl-4 text-muted">{children}</blockquote>,
-                }}
-              >
-                {body}
-              </ReactMarkdown>
-            ) : (
-              <p className="text-sm text-faint">Nothing to preview yet.</p>
-            )}
+            <MarkdownPreview body={body} />
           </div>
         ) : (
           <p className="mt-1.5 text-xs text-muted">Markdown is supported.</p>
