@@ -1,1 +1,52 @@
 @import "tailwindcss";
+
+/*
+ * Semantic colour tokens instead of writing `dark:` twice on every element.
+ * Components use bg-surface / bg-canvas / text-ink / border-line, so switching theme
+ * is a variable swap — and no component can end up half-converted.
+ */
+@theme {
+  --color-canvas: oklch(0.985 0 0);   /* page background */
+  --color-rail: oklch(0.97 0 0);      /* sidebar gutter */
+  --color-surface: oklch(1 0 0);      /* cards, inputs */
+  --color-elevated: oklch(1 0 0);     /* menus, popovers */
+  --color-ink: oklch(0.205 0 0);      /* primary text */
+  --color-muted: oklch(0.44 0 0);     /* secondary text — must stay DARKER than faint */
+  --color-faint: oklch(0.53 0 0);     /* tertiary text. Not lighter than this:
+                                         faint carries real content (dates, counts,
+                                         "(optional)"), so it must clear AA 4.5:1 on
+                                         canvas. Verified in both themes. */
+  --color-line: oklch(0.922 0 0);     /* borders */
+  --color-hairline: oklch(0.955 0 0); /* subtle dividers */
+  --color-hover: oklch(0.97 0 0);     /* hover fill */
+  --color-inverse: oklch(0.205 0 0);      /* active/primary fill */
+  --color-inverse-ink: oklch(0.985 0 0);  /* text on inverse */
+}
+
+.dark {
+  --color-canvas: oklch(0.17 0.004 285);
+  --color-rail: oklch(0.145 0.004 285);
+  --color-surface: oklch(0.215 0.005 285);
+  --color-elevated: oklch(0.25 0.006 285);
+  --color-ink: oklch(0.96 0 0);
+  --color-muted: oklch(0.72 0.004 285);
+  --color-faint: oklch(0.68 0.004 285);
+  --color-line: oklch(0.3 0.006 285);
+  --color-hairline: oklch(0.26 0.006 285);
+  --color-hover: oklch(0.27 0.006 285);
+  --color-inverse: oklch(0.96 0 0);
+  --color-inverse-ink: oklch(0.205 0 0);
+}
+
+html {
+  color-scheme: light;
+}
+.dark html,
+html.dark {
+  color-scheme: dark;
+}
+
+/* Images in link cards can be bright; take the edge off in dark mode. */
+.dark img {
+  filter: brightness(0.92);
+}
