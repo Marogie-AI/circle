@@ -5,13 +5,20 @@ import {
   ArrowLeft02Icon,
   ArrowUpRight01Icon,
   Cancel01Icon,
+  Bookmark02Icon,
   Comment01Icon,
+  Delete02Icon,
+  Edit02Icon,
   Copy01Icon,
   FavouriteIcon,
   Logout03Icon,
+  Menu02Icon,
+  Moon02Icon,
   MoreHorizontalIcon,
   PlusSignIcon,
+  Search01Icon,
   Settings02Icon,
+  Sun03Icon,
   Tag01Icon,
   UserAdd01Icon,
   UserGroupIcon,
@@ -45,3 +52,10 @@ export const CopyIcon = make(Copy01Icon);
 export const InviteIcon = make(UserAdd01Icon);
 export const SettingsIcon = make(Settings02Icon);
 export const MoreIcon = make(MoreHorizontalIcon);
+export const MenuIcon = make(Menu02Icon);
+export const BookmarkIcon = make(Bookmark02Icon);
+export const SearchIcon = make(Search01Icon);
+export const EditIcon = make(Edit02Icon);
+export const DeleteIcon = make(Delete02Icon);
+export const SunIcon = make(Sun03Icon);
+export const MoonIcon = make(Moon02Icon);
