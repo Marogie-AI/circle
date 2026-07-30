@@ -1,8 +1,10 @@
-"use client";
-
 import { SidebarContent, type SidebarProps } from "@/components/sidebar-content";
 
 /**
+ * Desktop rail (server component: no state, no hooks — it only positions
+ * SidebarContent, which is the client boundary).
+ *
+ * Original note:
  * Desktop rail — variant S5 (floating card). Positioning only; the contents come from
  * SidebarContent, which the mobile drawer also renders.
  *
