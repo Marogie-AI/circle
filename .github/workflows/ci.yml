@@ -1,0 +1,67 @@
+name: ci
+
+on: [push, pull_request]
+
+concurrency:
+  group: "${{ github.workflow }}-${{ github.ref }}"
+  cancel-in-progress: true
+
+jobs:
+  web:
+    runs-on: ubuntu-latest
+
+    # The lib/queries tests hit a real database — they assert on SQL behaviour
+    # (keyset predicates, cascade deletes, index-backed counts), which a mock
+    # cannot check. A service container is cheaper and safer than a Neon branch:
+    # no credentials exposed to fork PRs, nothing to clean up afterwards.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: circle
+          POSTGRES_USER: circle
+          POSTGRES_PASSWORD: circle
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U circle -d circle"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 15
+
+    env:
+      # apps/web's test script passes --env-file=.env.local, which is absent here.
+      # bun treats a missing env file as a no-op, so these win. Verified, not assumed.
+      DATABASE_URL: postgres://circle:circle@localhost:5432/circle
+      BETTER_AUTH_SECRET: ci-secret-not-a-real-one
+      BETTER_AUTH_URL: http://localhost:3002
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+
+      - run: bun install --frozen-lockfile
+
+      # drizzle/ is the only source of schema truth; the tests need the tables.
+      - run: bun run db:migrate
+
+      - run: bun run typecheck
+      - run: bun run test
+      - run: bun run lint
+      - run: bun run build
+
+  mobile:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/mobile
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: "3.x"
+          cache: true
+
+      - run: flutter pub get
+      - run: flutter analyze
+      - run: flutter test
