@@ -36,8 +36,18 @@ jobs:
       BETTER_AUTH_URL: http://localhost:3002
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
+
+      # Pinned, not inherited. `next build` runs under Node even when bun drives the
+      # script, so an unpinned runner default silently decides which Node compiled the
+      # thing you ship. 24 matches what Vercel runs.
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "24"
+
       - uses: oven-sh/setup-bun@v2
+
+      - run: node --version && bun --version
 
       - run: bun install --frozen-lockfile
 
@@ -56,7 +66,7 @@ jobs:
         working-directory: apps/mobile
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: subosito/flutter-action@v2
         with:
           flutter-version: "3.x"
