@@ -13,13 +13,9 @@ export async function proxy(request: NextRequest) {
     return NextResponse.redirect(loginUrl);
   }
 
-  // Layouts cannot read a child route's params, but the sidebar needs to know which
-  // group is open so it can fetch tag facets for THAT group only. Forwarding the
-  // pathname lets app/(app)/layout.tsx scope one query instead of fetching facets
-  // for every group the user belongs to. Presentation only — never trusted for access.
-  const requestHeaders = new Headers(request.headers);
-  requestHeaders.set("x-circle-pathname", request.nextUrl.pathname);
-  return NextResponse.next({ request: { headers: requestHeaders } });
+  // Nothing to forward: the x-circle-pathname header existed only so the layout could
+  // scope tag facets to the open group, and those now load in the feed page itself.
+  return NextResponse.next();
 }
 
 export const config = { matcher: ["/groups/:path*"] };

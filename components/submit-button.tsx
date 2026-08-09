@@ -1,0 +1,38 @@
+"use client";
+
+import { useFormStatus } from "react-dom";
+import type { ReactNode } from "react";
+
+/**
+ * Submit button that disables and swaps its label while its form is in flight.
+ *
+ * useFormStatus reads the ENCLOSING form's pending state, so a server component page
+ * can keep its plain <form action={serverAction}> and drop this in — no state, no
+ * conversion of the page to a client component. It must live inside the form, not
+ * render it, or the hook always reports idle.
+ */
+export function SubmitButton({
+  children,
+  pendingLabel,
+  className,
+  icon,
+}: {
+  children: ReactNode;
+  pendingLabel: string;
+  className: string;
+  icon?: ReactNode;
+}) {
+  const { pending } = useFormStatus();
+
+  return (
+    <button
+      type="submit"
+      disabled={pending}
+      aria-busy={pending}
+      className={`${className} disabled:cursor-not-allowed disabled:opacity-60`}
+    >
+      {pending ? null : icon}
+      {pending ? pendingLabel : children}
+    </button>
+  );
+}
