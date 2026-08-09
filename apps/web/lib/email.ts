@@ -1,4 +1,5 @@
 import { Resend } from "resend";
+import { logError, logWarn } from "@/lib/log";
 
 export const emailEnabled = Boolean(process.env.RESEND_API_KEY);
 
@@ -36,7 +37,7 @@ export async function sendVerificationEmail({
   try {
     const client = getResendClient();
     if (!client) {
-      console.error("Failed to send verification email: RESEND_API_KEY is missing.");
+      logWarn("email.verification.no_api_key");
       return;
     }
 
@@ -59,10 +60,13 @@ export async function sendVerificationEmail({
       text: `Verify your email for Circle\n\nConfirm your email address by opening this link:\n${url}`,
     });
 
+    // A signup whose verification email never arrives looks to the user like the account
+    // simply does not work, and nothing else in the flow reports it. Never log `to` or
+    // `url` — the URL is a bearer token for the account.
     if (result.error) {
-      console.error("Failed to send verification email:", result.error);
+      logError("email.verification.rejected", result.error);
     }
   } catch (error: unknown) {
-    console.error("Failed to send verification email:", error);
+    logError("email.verification.failed", error);
   }
 }
