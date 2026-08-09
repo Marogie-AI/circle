@@ -13,6 +13,7 @@ import { ReactionBar } from "@/components/reaction-bar";
 import { LinkCard } from "@/components/link-card";
 import { SaveButton } from "@/components/save-button";
 import { PostActionsMenu } from "@/components/post-actions-menu";
+import { SubmitButton } from "@/components/submit-button";
 import { Avatar, AvatarStack } from "@/components/avatar";
 import { requireMember } from "@/lib/guard";
 import { isSaved } from "@/lib/queries/saved";
@@ -58,7 +59,7 @@ export default async function PostPage({ params }: PostPageProps) {
 
   if (!post) notFound();
 
-  const [commentRows, reactionCounts, currentUserReactions, reactorRows] = await Promise.all([
+  const [commentRows, reactionCounts, currentUserReactions, reactorRows, saved] = await Promise.all([
     db
       .select({
         id: comments.id,
@@ -94,17 +95,19 @@ export default async function PostPage({ params }: PostPageProps) {
       .where(eq(reactions.postId, post.id))
       .orderBy(asc(reactions.createdAt))
       .limit(24),
+    // In the same batch: it only needs post.id and user.id, both already known, so
+    // awaiting it separately was one more sequential round-trip for nothing.
+    isSaved(user.id, post.id),
   ]);
   const counts = new Map(reactionCounts.map((row) => [row.emoji, row.count]));
   const selected = new Set(currentUserReactions.map((row) => row.emoji));
   const reactorNames = [...new Set(reactorRows.map((row) => row.name))];
-  const saved = await isSaved(user.id, post.id);
   // presentational only — the actions re-check this in their own WHERE clause
   const canManagePost = role === "owner" || post.authorId === user.id;
   const totalReactions = reactionCounts.reduce((sum, row) => sum + row.count, 0);
 
   return (
-    <main className="min-h-screen w-full px-6 py-10 sm:px-10 sm:py-12">
+    <main className="min-h-full w-full min-w-0 px-6 pb-10 pt-9 sm:px-10 sm:pb-12">
       <header className="flex items-center justify-between gap-4 border-b border-line pb-5">
         <Link href={`/groups/${slug}`} className="group inline-flex min-w-0 items-center gap-1.5 text-sm font-medium text-muted transition hover:text-ink">
           <BackIcon size={16} className="transition group-hover:-translate-x-0.5" />
@@ -193,7 +196,7 @@ export default async function PostPage({ params }: PostPageProps) {
       </article>
 
       <aside className="min-w-0 lg:sticky lg:top-6 lg:h-fit">
-        <section aria-label="Reactions" className="rounded-2xl border border-line bg-surface p-3">
+        <section aria-label="Reactions" className="border-t border-hairline pt-4">
           <ReactionBar
             counts={Object.fromEntries(counts)}
             mine={[...selected]}
@@ -219,12 +222,17 @@ export default async function PostPage({ params }: PostPageProps) {
           <label htmlFor="comment" className="sr-only">Add a comment</label>
           <textarea id="comment" name="body" required minLength={1} maxLength={5000} rows={3} placeholder="Add a comment…" className="w-full resize-y rounded-xl border border-line bg-surface px-3 py-2.5 text-sm leading-6 outline-none transition placeholder:text-faint focus:border-inverse focus:ring-2 focus:ring-inverse/10" />
           <div className="mt-3 flex justify-end">
-            <button type="submit" className="rounded-lg bg-inverse px-4 py-2.5 text-sm font-medium text-inverse-ink hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inverse focus-visible:ring-offset-2">Comment</button>
+            <SubmitButton
+              pendingLabel="Posting…"
+              className="rounded-lg bg-inverse px-4 py-2.5 text-sm font-medium text-inverse-ink hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inverse focus-visible:ring-offset-2"
+            >
+              Comment
+            </SubmitButton>
           </div>
         </form>
 
         {commentRows.length ? (
-          <ul className="mt-5 divide-y divide-line border-t border-line">
+          <ul className="mt-5 divide-y divide-hairline border-t border-hairline">
             {commentRows.map((comment) => (
               <li key={comment.id} className="flex gap-2.5 py-4">
                 <Avatar name={comment.authorName} size="sm" className="mt-0.5" />

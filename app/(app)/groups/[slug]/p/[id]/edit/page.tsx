@@ -35,8 +35,8 @@ export default async function EditPostPage({ params }: EditPageProps) {
   if (role !== "owner" && post.authorId !== user.id) notFound();
 
   return (
-    <main className="mx-auto min-h-screen w-full max-w-2xl px-6 py-10 sm:py-12">
-      <header className="border-b border-line pb-5">
+    <main className="mx-auto min-h-full w-full max-w-4xl px-6 pb-10 pt-9 sm:pb-12">
+      <header>
         <Link
           href={`/groups/${slug}/p/${post.id}`}
           className="group inline-flex items-center gap-1.5 text-sm font-medium text-muted transition hover:text-ink"

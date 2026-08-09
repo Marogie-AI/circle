@@ -13,7 +13,7 @@ export default async function SavedPage() {
   const saved = await listSavedPosts(session.user.id);
 
   return (
-    <main className="min-h-screen w-full px-6 py-10 sm:px-10 sm:py-12">
+    <main className="min-h-full w-full min-w-0 px-6 pb-10 pt-9 sm:px-10 sm:pb-12">
       <PageHeader
         title="Saved"
         meta={
@@ -25,7 +25,7 @@ export default async function SavedPage() {
       />
 
       {saved.length === 0 ? (
-        <div className="mt-8 rounded-2xl border border-dashed border-line bg-surface px-6 py-14 text-center">
+        <div className="mt-8 rounded-2xl border border-dashed border-line px-6 py-14 text-center">
           <span className="mx-auto flex size-11 items-center justify-center rounded-2xl bg-rail text-muted">
             <BookmarkIcon size={22} />
           </span>
@@ -37,7 +37,7 @@ export default async function SavedPage() {
           </p>
         </div>
       ) : (
-        <ul className="mt-8 overflow-hidden rounded-2xl border border-line bg-surface shadow-sm">
+        <ul className="mt-8 divide-y divide-hairline border-t border-hairline">
           {saved.map((post) => (
             <li
               key={post.id}

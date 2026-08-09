@@ -15,7 +15,7 @@ export default async function JoinPage({ params }: JoinPageProps) {
   if (!invite) {
     return (
       <main className="flex min-h-screen items-center justify-center px-4 py-12">
-        <div className="w-full max-w-sm rounded-2xl border border-line bg-surface p-8 text-center shadow-sm">
+        <div className="w-full max-w-sm p-8 text-center">
           <p className="text-sm font-semibold tracking-tight text-ink">Circle</p>
           <h1 className="mt-5 text-2xl font-semibold tracking-tight text-ink">
             This invite link no longer works

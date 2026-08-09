@@ -42,7 +42,13 @@ export function SaveButton({
             }`
       }
     >
-      <BookmarkIcon size={variant === "labelled" ? 16 : 17} />
+      {/* Saved fills the glyph. Stroke colour alone (faint vs ink) was the only
+          difference before, which in a zero-chroma palette is nearly invisible — the
+          toggle read as broken even though it was writing to the database. */}
+      <BookmarkIcon
+        size={variant === "labelled" ? 16 : 17}
+        fill={isSaved ? "currentColor" : "none"}
+      />
       {variant === "labelled" ? (isSaved ? "Saved" : "Save") : null}
     </button>
   );

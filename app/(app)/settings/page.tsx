@@ -11,7 +11,7 @@ export default async function SettingsPage() {
   const displayName = session.user.name || session.user.email;
 
   return (
-    <main className="min-h-screen w-full px-6 py-10 sm:px-10 sm:py-12">
+    <main className="min-h-full w-full min-w-0 px-6 pb-10 pt-9 sm:px-10 sm:pb-12">
       <PageHeader
         eyebrow="Account"
         title="Settings"
@@ -23,8 +23,10 @@ export default async function SettingsPage() {
         }
       />
 
-      <div className="grid max-w-4xl gap-6 pt-8 md:grid-cols-2">
-        <section className="h-fit rounded-2xl border border-line bg-surface p-6 shadow-sm">
+      {/* Stacked sections separated by a rule, not side-by-side cards. A single
+          column also stops the two forms from setting each other's height. */}
+      <div className="max-w-xl pt-8">
+        <section className="border-b border-hairline pb-10">
           <h2 className="text-base font-semibold tracking-tight text-ink">
             Profile
           </h2>
@@ -34,7 +36,7 @@ export default async function SettingsPage() {
           <DisplayNameForm initialName={session.user.name ?? ""} />
         </section>
 
-        <section className="h-fit rounded-2xl border border-line bg-surface p-6 shadow-sm">
+        <section className="pt-10">
           <h2 className="text-base font-semibold tracking-tight text-ink">
             Password
           </h2>

@@ -3,6 +3,7 @@ import { and, asc, desc, eq, gt, isNull } from "drizzle-orm";
 import { headers } from "next/headers";
 import { createInvite, revokeInvite } from "@/app/(app)/groups/[slug]/actions";
 import { CopyButton } from "@/components/copy-button";
+import { SubmitButton } from "@/components/submit-button";
 import { db } from "@/db";
 import { invites, memberships, user as users } from "@/db/schema";
 import { requireMember } from "@/lib/guard";
@@ -58,7 +59,7 @@ export default async function SettingsPage({ params }: SettingsPageProps) {
   ]);
 
   return (
-    <main className="min-h-screen w-full px-6 py-10 sm:px-10 sm:py-14">
+    <main className="min-h-full w-full min-w-0 px-6 pb-10 pt-9 sm:px-10 sm:pb-14">
       {/* brand + identity live in the sidebar; only page actions stay here */}
       <div className="flex items-center justify-between gap-4">
         <p className="truncate text-sm text-muted">You are {role} of this group</p>
@@ -71,7 +72,7 @@ export default async function SettingsPage({ params }: SettingsPageProps) {
       </div>
 
       <div className="max-w-4xl space-y-10 pt-6 pb-10">
-        <section aria-labelledby="invite-heading" className="rounded-2xl border border-line bg-surface p-6 shadow-sm sm:p-8">
+        <section aria-labelledby="invite-heading" className="border-b border-hairline pb-10">
           <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
             <div>
               <p className="text-sm font-medium text-muted">{group.name}</p>
@@ -81,14 +82,17 @@ export default async function SettingsPage({ params }: SettingsPageProps) {
               <p className="mt-2 text-sm text-muted">Links expire seven days after they are created.</p>
             </div>
             <form action={createInvite.bind(null, slug)}>
-              <button type="submit" className="w-full rounded-lg bg-inverse px-4 py-2.5 text-sm font-medium text-inverse-ink transition hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inverse focus-visible:ring-offset-2 sm:w-auto">
+              <SubmitButton
+                pendingLabel="Creating…"
+                className="w-full rounded-lg bg-inverse px-4 py-2.5 text-sm font-medium text-inverse-ink transition hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inverse focus-visible:ring-offset-2 sm:w-auto"
+              >
                 Create invite link
-              </button>
+              </SubmitButton>
             </form>
           </div>
 
           {activeInvites.length > 0 ? (
-            <ul className="mt-7 divide-y divide-line border-t border-line">
+            <ul className="mt-7 divide-y divide-hairline border-t border-hairline">
               {activeInvites.map((invite) => {
                 const url = `${origin}/join/${encodeURIComponent(invite.token)}`;
 
@@ -101,9 +105,12 @@ export default async function SettingsPage({ params }: SettingsPageProps) {
                       <div className="flex items-center gap-2">
                         <CopyButton value={url} />
                         <form action={revokeInvite.bind(null, slug, invite.token)}>
-                          <button type="submit" className="rounded-lg border border-line bg-surface px-3 py-2 text-sm font-medium text-ink transition hover:border-red-200 hover:bg-red-50 hover:text-red-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inverse focus-visible:ring-offset-2">
+                          <SubmitButton
+                            pendingLabel="Revoking…"
+                            className="rounded-lg border border-line bg-surface px-3 py-2 text-sm font-medium text-ink transition hover:border-red-200 hover:bg-red-50 hover:text-red-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inverse focus-visible:ring-offset-2"
+                          >
                             Revoke
-                          </button>
+                          </SubmitButton>
                         </form>
                       </div>
                     </div>
@@ -115,19 +122,19 @@ export default async function SettingsPage({ params }: SettingsPageProps) {
               })}
             </ul>
           ) : (
-            <div className="mt-7 rounded-xl border border-dashed border-line bg-canvas px-5 py-8 text-center">
+            <div className="mt-7 rounded-xl border border-dashed border-line px-5 py-8 text-center">
               <p className="text-sm font-medium text-ink">No active invite links</p>
               <p className="mt-1 text-sm text-muted">Create one when you’re ready to add someone.</p>
             </div>
           )}
         </section>
 
-        <section aria-labelledby="members-heading" className="rounded-2xl border border-line bg-surface p-6 shadow-sm sm:p-8">
+        <section aria-labelledby="members-heading">
           <div className="flex items-baseline justify-between gap-4">
             <h2 id="members-heading" className="text-xl font-semibold tracking-tight text-ink">Members</h2>
             <p className="text-sm text-muted">{members.length} total</p>
           </div>
-          <ul className="mt-5 divide-y divide-line border-t border-line">
+          <ul className="mt-5 divide-y divide-hairline border-t border-hairline">
             {members.map((member) => (
               <li key={member.userId} className="flex items-center justify-between gap-4 py-4">
                 <div className="min-w-0">
