@@ -16,7 +16,10 @@ export function MobileNav(props: Omit<SidebarProps, "onNavigate">) {
   const pathname = usePathname();
   const panelRef = useRef<HTMLDivElement>(null);
 
-  // close on navigation, so tapping a group doesn't leave the drawer covering it
+  // Close on navigation, so tapping a group doesn't leave the drawer covering it.
+  // pathname is not read in the body — it IS the trigger. Biome's "unnecessary dependency"
+  // fix would make this run once on mount, leaving the drawer open over the page you tapped.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: pathname is the trigger, not a read
   useEffect(() => {
     setOpen(false);
   }, [pathname]);

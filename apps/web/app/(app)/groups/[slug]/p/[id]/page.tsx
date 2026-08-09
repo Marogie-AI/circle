@@ -8,7 +8,7 @@ import { toggleSaved } from "@/app/(app)/saved/actions";
 import { db } from "@/db";
 import { comments, posts, reactions, user as users } from "@/db/schema";
 import { buttonStyles } from "@/components/page-header";
-import { BackIcon, ExternalIcon, PlusIcon } from "@/components/icons";
+import { BackIcon, PlusIcon } from "@/components/icons";
 import { ReactionBar } from "@/components/reaction-bar";
 import { LinkCard } from "@/components/link-card";
 import { SaveButton } from "@/components/save-button";
@@ -17,7 +17,7 @@ import { SubmitButton } from "@/components/submit-button";
 import { Avatar, AvatarStack } from "@/components/avatar";
 import { requireMember } from "@/lib/guard";
 import { isSaved } from "@/lib/queries/saved";
-import { isUuid, REACTION_EMOJIS, REACTION_LABELS } from "@/lib/post";
+import { isUuid } from "@/lib/post";
 
 type PostPageProps = {
   params: Promise<{ slug: string; id: string }>;

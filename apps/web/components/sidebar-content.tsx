@@ -124,6 +124,7 @@ export function SidebarContent({
                       // No room for a number in a 68px rail; a dot still says
                       // "something new in here".
                       <span
+                        role="img"
                         aria-label={`${count} unread`}
                         className={`absolute right-2 top-2 h-1.5 w-1.5 rounded-full ${
                           active ? "bg-surface" : "bg-inverse"
@@ -131,7 +132,10 @@ export function SidebarContent({
                       />
                     ) : null}
                     {!collapsed && count > 0 ? (
+                      // role="img" so the label wins over the visible text: the badge
+                      // truncates to "99+", the label carries the real count.
                       <span
+                        role="img"
                         aria-label={`${count} unread`}
                         className={`shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-semibold tabular-nums ${
                           active ? "bg-surface text-ink" : "bg-inverse text-inverse-ink"

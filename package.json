@@ -10,6 +10,7 @@
     "build": "bun --filter web build",
     "start": "bun --filter web start",
     "test": "bun --filter web test",
+    "lint": "bun --filter web lint",
     "typecheck": "bun --filter web typecheck",
     "db:generate": "bun --filter web db:generate",
     "db:migrate": "bun --filter web db:migrate"

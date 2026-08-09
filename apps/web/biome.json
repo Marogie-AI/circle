@@ -1,0 +1,40 @@
+{
+	"$schema": "https://biomejs.dev/schemas/2.5.7/schema.json",
+	"vcs": { "enabled": false, "clientKind": "git", "useIgnoreFile": false },
+	"files": {
+		"ignoreUnknown": false,
+		"includes": [
+			"**",
+			"!.next",
+			"!drizzle",
+			"!next-env.d.ts",
+			"!**/*.css"
+		]
+	},
+	"linter": {
+		"enabled": true,
+		"rules": {
+			"preset": "recommended",
+			"performance": {
+				"noImgElement": "off"
+			}
+		},
+		"domains": { "next": "recommended", "react": "recommended" }
+	},
+	"overrides": [
+		{
+			"includes": ["**/loading.tsx", "**/*skeleton*.tsx", "components/avatar.tsx"],
+			"linter": {
+				"rules": {
+					"suspicious": {
+						"noArrayIndexKey": "off"
+					}
+				}
+			}
+		}
+	],
+	"formatter": {
+		"enabled": false
+	},
+	"assist": { "enabled": false }
+}
