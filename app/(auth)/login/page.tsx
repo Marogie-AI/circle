@@ -24,8 +24,12 @@ function LoginForm() {
 
     const form = new FormData(event.currentTarget);
     const result = await signIn.email({
-      email: String(form.get("email")),
-      password: String(form.get("password")),
+      // Both trimmed — a pasted value routinely carries a trailing space and
+      // better-auth 400s on a padded email. The password is trimmed here and
+      // in signup; the two MUST stay symmetric or the hash written at signup
+      // will not match the value sent at login.
+      email: String(form.get("email") ?? "").trim(),
+      password: String(form.get("password") ?? "").trim(),
     });
 
     setPending(false);
@@ -44,10 +48,9 @@ function LoginForm() {
 
   return (
     
-      <div className="w-full max-w-sm rounded-2xl border border-line bg-surface p-8 shadow-sm">
+      <div className="w-full max-w-sm">
         <div className="mb-8">
-          <Link href="/" className="text-sm font-semibold tracking-tight text-ink">Circle</Link>
-          <h1 className="mt-5 text-2xl font-semibold tracking-tight">Welcome back</h1>
+          <h1 className="text-3xl font-semibold tracking-tight">Welcome back</h1>
           <p className="mt-2 text-sm text-muted">Log in to your circle.</p>
         </div>
 

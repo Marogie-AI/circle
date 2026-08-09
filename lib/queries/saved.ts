@@ -44,7 +44,15 @@ export async function listSavedPosts(userId: string): Promise<SavedPost[]> {
     ORDER BY s.created_at DESC
     LIMIT 200
   `);
-  return result.rows;
+
+  // db.execute returns driver rows verbatim — Drizzle's column mapping does not run on
+  // raw SQL, so these timestamps arrive as strings even though the row type says Date.
+  // Coerce here, once, rather than making every caller remember to.
+  return result.rows.map((row) => ({
+    ...row,
+    createdAt: new Date(row.createdAt),
+    savedAt: new Date(row.savedAt),
+  }));
 }
 
 /** Which of these post ids the user has saved — one query for a whole feed page. */

@@ -24,9 +24,11 @@ function SignupForm() {
 
     const form = new FormData(event.currentTarget);
     const result = await signUp.email({
-      name: String(form.get("name")),
-      email: String(form.get("email")),
-      password: String(form.get("password")),
+      // Trimmed to match login exactly. If either side stops trimming the
+      // password, accounts created before the change can no longer log in.
+      name: String(form.get("name") ?? "").trim(),
+      email: String(form.get("email") ?? "").trim(),
+      password: String(form.get("password") ?? "").trim(),
     });
 
     setPending(false);
@@ -41,12 +43,9 @@ function SignupForm() {
 
   return (
     
-      <div className="w-full max-w-sm rounded-2xl border border-line bg-surface p-8 shadow-sm">
+      <div className="w-full max-w-sm">
         <div className="mb-8">
-          <Link href="/" className="text-sm font-semibold tracking-tight text-ink">
-            Circle
-          </Link>
-          <h1 className="mt-5 text-2xl font-semibold tracking-tight">Create your account</h1>
+          <h1 className="text-3xl font-semibold tracking-tight">Create your account</h1>
           <p className="mt-2 text-sm text-muted">A private place for the good stuff.</p>
         </div>
 
