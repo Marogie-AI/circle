@@ -3,6 +3,7 @@ export * from "./auth-schema";
 import { desc } from "drizzle-orm";
 import {
   index,
+  integer,
   pgTable,
   primaryKey,
   text,
@@ -135,6 +136,22 @@ export const reactions = pgTable(
     primaryKey({ columns: [table.postId, table.userId, table.emoji] }),
   ],
 );
+
+/**
+ * Fixed-window rate limit counters.
+ *
+ * In Postgres rather than memory because serverless instances do not share memory — an
+ * in-process Map would reset on every cold start and would be per-instance, so Vercel
+ * spinning up more instances under load defeats exactly the limit you wanted. This costs
+ * one extra round-trip on paths that already talk to Postgres.
+ *
+ * `key` encodes scope and subject, e.g. "post:<userId>" or "mobile:<userId>".
+ */
+export const rateLimits = pgTable("rate_limits", {
+  key: text("key").primaryKey(),
+  count: integer("count").notNull(),
+  resetAt: timestamp("reset_at", { withTimezone: true }).notNull(),
+});
 
 /** Per-member "I have seen this group up to here", drives the unread badges. */
 export const groupReads = pgTable(

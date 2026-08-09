@@ -10,8 +10,20 @@ import { comments, invites, posts, reactions } from "@/db/schema";
 import { requireMember } from "@/lib/guard";
 import { safeFetchPreview } from "@/lib/link-preview";
 import { isUuid, REACTION_EMOJIS } from "@/lib/post";
+import { allow } from "@/lib/rate-limit";
 
 export type PostActionState = { error: string | null };
+
+/**
+ * Limits on the two actions that create durable content. Set well above what a person
+ * types by hand — the point is to blunt a script, not to nag a fast writer.
+ *
+ * toggleReaction and the save/unsave toggles are deliberately not limited: they are
+ * idempotent against a composite primary key and a fixed emoji allowlist, so hammering
+ * them cannot create unbounded rows.
+ */
+const POST_LIMIT = { max: 20, windowSeconds: 60 };
+const COMMENT_LIMIT = { max: 30, windowSeconds: 60 };
 
 function normalizeTags(value: string) {
   return Array.from(
@@ -151,6 +163,10 @@ export async function createPost(
   const { group, user } = await requireMember(slug);
   const fields = readPostFields(formData);
   if (!fields.ok) return { error: fields.error };
+
+  if (!(await allow(`post:${user.id}`, POST_LIMIT.max, POST_LIMIT.windowSeconds))) {
+    return { error: "You are posting very fast. Wait a moment and try again." };
+  }
 
   const [newPost] = await db
     .insert(posts)
@@ -293,6 +309,11 @@ export async function addComment(
 
   if (body.length < 1 || body.length > 5_000) {
     throw new Error("Comment must be between 1 and 5,000 characters.");
+  }
+  if (
+    !(await allow(`comment:${user.id}`, COMMENT_LIMIT.max, COMMENT_LIMIT.windowSeconds))
+  ) {
+    throw new Error("You are commenting very fast. Wait a moment and try again.");
   }
   if (!(await postInGroup(postId, group.id))) notFound();
 
