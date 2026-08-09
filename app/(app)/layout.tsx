@@ -1,10 +1,11 @@
+import { Suspense } from "react";
 import { headers } from "next/headers";
 import { AppSidebar } from "@/components/app-sidebar";
 import { MobileNav } from "@/components/mobile-nav";
 import { CommandPalette } from "@/components/command-palette";
+import { SidebarSkeleton } from "@/components/sidebar-skeleton";
+import { getChromeData } from "@/app/(app)/chrome-data";
 import { auth } from "@/lib/auth";
-import { listGroupsForUser, listTagFacets } from "@/lib/queries/groups";
-import { unreadCounts } from "@/lib/queries/reads";
 
 // SECURITY: this layout is CHROME ONLY. It is not an authorization boundary.
 // Rendering the sidebar for a signed-in user says nothing about which groups they
@@ -22,37 +23,51 @@ export default async function AppLayout({
   // Signed out (e.g. the landing page at "/") renders bare, without app chrome.
   if (!session) return <>{children}</>;
 
-  const [groups, unread] = await Promise.all([
-    listGroupsForUser(session.user.id),
-    unreadCounts(session.user.id),
-  ]);
-
-  // Slug comes from the header proxy.ts forwards, so tag facets are fetched for the
-  // open group only. Cross-checked against the user's own memberships below, so a
-  // spoofed header can never surface another group's tags.
-  const slug = (requestHeaders.get("x-circle-pathname") ?? "").match(
-    /^\/groups\/([^/]+)/,
-  )?.[1];
-  const activeGroup = slug
-    ? groups.find((group) => group.slug === decodeURIComponent(slug))
-    : undefined;
-  const tags = activeGroup ? await listTagFacets(activeGroup.id) : [];
-
-  const sidebar = {
-    groups,
-    user: session.user,
-    tags,
-    unread: Object.fromEntries(unread),
-  };
+  const user = session.user;
 
   return (
-    <div className="flex min-h-screen w-full bg-rail">
-      <AppSidebar {...sidebar} />
-      <div className="flex min-w-0 flex-1 flex-col bg-canvas">
-        <MobileNav {...sidebar} />
+    // h-screen + overflow-hidden here means the DOCUMENT never scrolls, so there is
+    // no page-level scrollbar and no body rubber-banding. The content column below
+    // scrolls instead — clipping it outright would hide every post past the fold.
+    <div className="flex h-screen w-full overflow-hidden bg-canvas">
+      {/* The sidebar's queries used to be awaited by this layout, which held EVERY
+          page behind them — one slow query blanked the whole app. Behind Suspense the
+          chrome streams in beside the page instead of ahead of it. */}
+      <Suspense fallback={<SidebarSkeleton />}>
+        <DesktopChrome userId={user.id} user={user} />
+      </Suspense>
+
+      {/* overflow-x-hidden: the feed's 720px table has its own horizontal scroller,
+          but without this the page itself stretches to fit it on a phone and every
+          other element ends up wider than the viewport. */}
+      <div className="flex min-w-0 flex-1 flex-col overflow-y-auto overflow-x-hidden">
+        {/* Stays inside the scrolling column: it is sticky, and hoisting it out would
+            make it a flex item in the row beside the sidebar. */}
+        <Suspense fallback={null}>
+          <MobileChrome userId={user.id} user={user} />
+        </Suspense>
         {children}
       </div>
-      <CommandPalette groups={groups} />
     </div>
   );
+}
+
+type ChromeProps = {
+  userId: string;
+  user: { name?: string | null; email: string };
+};
+
+async function DesktopChrome({ userId, user }: ChromeProps) {
+  const { groups, unread } = await getChromeData(userId);
+  return (
+    <>
+      <AppSidebar groups={groups} user={user} unread={unread} />
+      <CommandPalette groups={groups} />
+    </>
+  );
+}
+
+async function MobileChrome({ userId, user }: ChromeProps) {
+  const { groups, unread } = await getChromeData(userId);
+  return <MobileNav groups={groups} user={user} unread={unread} />;
 }

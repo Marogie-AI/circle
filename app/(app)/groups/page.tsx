@@ -2,6 +2,7 @@ import Link from "next/link";
 import { createGroup } from "@/app/(app)/actions";
 import { PageHeader } from "@/components/page-header";
 import { GroupIcon, PlusIcon } from "@/components/icons";
+import { SubmitButton } from "@/components/submit-button";
 import { requireSession } from "@/lib/guard";
 import { listGroupsForUser } from "@/lib/queries/groups";
 
@@ -10,7 +11,7 @@ export default async function GroupsPage() {
   const userGroups = await listGroupsForUser(session.user.id);
 
   return (
-    <main className="min-h-screen w-full px-6 py-10 sm:px-10 sm:py-12">
+    <main className="min-h-full w-full min-w-0 px-6 pb-10 pt-9 sm:px-10 sm:pb-12">
       <PageHeader
         title="Your groups"
         meta={
@@ -26,28 +27,33 @@ export default async function GroupsPage() {
       <div className="grid gap-10 pt-8 lg:grid-cols-[minmax(0,1fr)_22rem]">
         <section>
           {userGroups.length > 0 ? (
-            <ul className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+            // Rows, not cards: hierarchy comes from the divider rhythm and a hover
+            // tone rather than from twelve floating boxes.
+            <ul className="divide-y divide-hairline border-t border-hairline">
               {userGroups.map((group) => (
                 <li key={group.id}>
                   <Link
                     href={`/groups/${group.slug}`}
-                    className="group flex h-full flex-col rounded-2xl border border-line bg-surface p-5 shadow-sm transition hover:border-line hover:shadow focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inverse focus-visible:ring-offset-2"
+                    prefetch
+                    className="group flex items-center gap-3 px-2 py-4 transition hover:bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inverse focus-visible:ring-offset-2"
                   >
-                    <span className="flex size-9 items-center justify-center rounded-xl bg-inverse text-inverse-ink">
+                    <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-inverse text-inverse-ink">
                       <GroupIcon size={18} />
                     </span>
-                    <h2 className="mt-4 truncate font-semibold tracking-tight text-ink group-hover:underline group-hover:underline-offset-4">
-                      {group.name}
-                    </h2>
-                    <p className="mt-1 text-xs font-medium uppercase tracking-wide text-faint">
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate font-medium tracking-tight text-ink group-hover:underline group-hover:underline-offset-4">
+                        {group.name}
+                      </span>
+                    </span>
+                    <span className="shrink-0 text-xs font-medium uppercase tracking-wide text-faint">
                       {group.role}
-                    </p>
+                    </span>
                   </Link>
                 </li>
               ))}
             </ul>
           ) : (
-            <div className="rounded-2xl border border-dashed border-line bg-surface px-6 py-14 text-center">
+            <div className="rounded-2xl border border-dashed border-line px-6 py-14 text-center">
               <span className="mx-auto flex size-11 items-center justify-center rounded-2xl bg-rail text-muted">
                 <GroupIcon size={22} />
               </span>
@@ -62,7 +68,7 @@ export default async function GroupsPage() {
           )}
         </section>
 
-        <aside className="h-fit rounded-2xl border border-line bg-surface p-6 shadow-sm">
+        <aside className="h-fit border-t border-hairline pt-6 lg:border-l lg:border-t-0 lg:pl-10 lg:pt-0">
           <h2 className="text-base font-semibold tracking-tight text-ink">
             New group
           </h2>
@@ -88,13 +94,13 @@ export default async function GroupsPage() {
                 className="w-full rounded-lg border border-line bg-surface px-3 py-2.5 text-sm outline-none transition placeholder:text-faint focus:border-inverse focus:ring-2 focus:ring-inverse/10"
               />
             </div>
-            <button
-              type="submit"
+            <SubmitButton
+              pendingLabel="Creating…"
+              icon={<PlusIcon size={16} />}
               className="inline-flex w-full items-center justify-center gap-1.5 rounded-lg bg-inverse px-4 py-2.5 text-sm font-medium text-inverse-ink transition hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inverse focus-visible:ring-offset-2"
             >
-              <PlusIcon size={16} />
               Create group
-            </button>
+            </SubmitButton>
           </form>
         </aside>
       </div>

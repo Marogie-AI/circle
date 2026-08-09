@@ -1,0 +1,1 @@
+CREATE INDEX "posts_group_author_feed_idx" ON "posts" USING btree ("group_id","author_id","created_at" desc,"id" desc);

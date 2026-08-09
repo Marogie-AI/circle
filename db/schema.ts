@@ -87,6 +87,14 @@ export const posts = pgTable(
       desc(table.id),
     ),
     index("posts_tags_idx").using("gin", table.tags),
+    // The author filter on the feed sorts by the same keys as the feed itself. Without
+    // this, filtering a busy group to one infrequent poster scans most of the group.
+    index("posts_group_author_feed_idx").on(
+      table.groupId,
+      table.authorId,
+      desc(table.createdAt),
+      desc(table.id),
+    ),
   ],
 );
 

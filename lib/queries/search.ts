@@ -14,11 +14,20 @@ export type SearchHit = {
 };
 
 /**
- * Full-text search over a group's posts.
+ * Search over a group's posts: full-text OR a literal title match.
  *
  * websearch_to_tsquery, NOT to_tsquery: it takes human input ("postgres -index",
  * quotes, stray punctuation) and never throws, where to_tsquery raises a syntax error
  * on anything unbalanced — i.e. on ordinary typing.
+ *
+ * The ILIKE arm exists because full-text alone loses two very ordinary searches:
+ * stopwords ("the un" reduces to nothing, since `the` is dropped) and partial words
+ * (`un` is not the lexeme `unreasonable`, so it never matches). Typing half a title
+ * and getting "No results" reads as a broken search box.
+ *
+ * ponytail: leading-wildcard ILIKE cannot use a btree index, so this scans the group's
+ * titles. Bounded by group_id and by LIMIT, which is fine at this size; if a single
+ * group ever gets huge, add a pg_trgm GIN index on title and this query stays as-is.
  *
  * groupId is ALWAYS AND-ed in, so a search can never surface another group's posts.
  */
@@ -50,14 +59,18 @@ export async function searchGroupPosts({
     JOIN groups g ON g.id = p.group_id
     JOIN "user" u ON u.id = p.author_id
     WHERE p.group_id = ${groupId}
-      AND p.search_vector @@ websearch_to_tsquery('english', ${trimmed})
+      AND (
+        p.search_vector @@ websearch_to_tsquery('english', ${trimmed})
+        OR p.title ILIKE ${`%${trimmed}%`}
+      )
     ORDER BY ts_rank(p.search_vector, websearch_to_tsquery('english', ${trimmed})) DESC,
              p.created_at DESC,
              p.id DESC
     LIMIT ${limit}
   `);
 
-  return result.rows;
+  // Raw SQL: Drizzle does not map columns, so created_at arrives as a string.
+  return result.rows.map((row) => ({ ...row, createdAt: new Date(row.createdAt) }));
 }
 
 /** Cross-group search for the command palette: only groups the caller belongs to. */
@@ -88,11 +101,17 @@ export async function searchMyPosts({
     JOIN "user" u ON u.id = p.author_id
     -- the membership join IS the authorization: no row, no result
     JOIN memberships m ON m.group_id = p.group_id AND m.user_id = ${userId}
-    WHERE p.search_vector @@ websearch_to_tsquery('english', ${trimmed})
+    -- Same OR-ILIKE arm as searchGroupPosts: the palette is type-ahead, so partial
+    -- words are the norm, and full-text alone would show nothing until you finish one.
+    WHERE (
+      p.search_vector @@ websearch_to_tsquery('english', ${trimmed})
+      OR p.title ILIKE ${`%${trimmed}%`}
+    )
     ORDER BY ts_rank(p.search_vector, websearch_to_tsquery('english', ${trimmed})) DESC,
              p.created_at DESC
     LIMIT ${limit}
   `);
 
-  return result.rows;
+  // Raw SQL: Drizzle does not map columns, so created_at arrives as a string.
+  return result.rows.map((row) => ({ ...row, createdAt: new Date(row.createdAt) }));
 }

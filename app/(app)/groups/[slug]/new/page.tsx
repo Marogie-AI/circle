@@ -9,11 +9,13 @@ export default async function NewPostPage({ params }: NewPostPageProps) {
   const { group } = await requireMember(slug);
 
   return (
-    <main className="mx-auto min-h-screen w-full max-w-2xl px-6 py-10 sm:py-14">
-      <header className="border-b border-line pb-6">
+    // pt-9 puts the back link's optical centre on the sidebar wordmark's:
+    // 12px rail padding + 20px card padding + half of the 28px logo.
+    <main className="mx-auto min-h-full w-full max-w-4xl px-6 pb-10 pt-9 sm:pb-14">
+      <header>
         <Link href={`/groups/${slug}`} className="text-sm font-medium text-muted transition hover:text-ink">← Back to {group.name}</Link>
       </header>
-      <section className="py-10">
+      <section className="pt-8 pb-10">
         <p className="text-sm font-medium text-muted">{group.name}</p>
         <h1 className="mt-1 text-3xl font-semibold tracking-tight text-ink">New post</h1>
         <p className="mt-2 text-sm text-muted">Share something useful with your circle.</p>

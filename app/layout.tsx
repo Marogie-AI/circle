@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Script from "next/script";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -19,7 +20,13 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
-        <script dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} />
+        {/* next/script with beforeInteractive, not a bare <script>: React 19 does
+            not execute a script element rendered by a component, and Next 16 now
+            warns about it. beforeInteractive still injects it into <head> and
+            runs it before hydration, which is what keeps the dark-mode flash away. */}
+        <Script id="circle-theme" strategy="beforeInteractive">
+          {THEME_SCRIPT}
+        </Script>
       </head>
       <body className="min-h-screen bg-canvas text-ink antialiased">
         {children}

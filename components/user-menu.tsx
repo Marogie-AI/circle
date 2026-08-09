@@ -16,8 +16,11 @@ import { ThemeToggle } from "@/components/theme-toggle";
  */
 export function UserMenu({
   user,
+  collapsed = false,
 }: {
   user: { name?: string | null; email: string };
+  /** Collapsed rail: avatar only, and the panel needs its own width. */
+  collapsed?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [pending, setPending] = useState(false);
@@ -55,7 +58,11 @@ export function UserMenu({
           role="menu"
           // w-full, not a fixed width: the panel must stay inside the sidebar card
           // or it spills past the rounded edge and breaks the floating-card look
-          className="absolute bottom-full left-0 z-20 mb-2 w-full overflow-hidden rounded-xl border border-line bg-surface shadow-lg"
+          className={`absolute bottom-full left-0 z-20 mb-2 overflow-hidden rounded-xl border border-line bg-surface shadow-lg ${
+            // w-full would be 52px in the collapsed rail, so give it a real
+            // width there and let it spill outward instead.
+            collapsed ? "w-56" : "w-full"
+          }`}
         >
           {/* Only the email here — the trigger directly below already shows the avatar
               and name, so repeating them made the open menu read as duplicated. */}
@@ -93,13 +100,20 @@ export function UserMenu({
         onClick={() => setOpen((v) => !v)}
         aria-haspopup="menu"
         aria-expanded={open}
-        className="flex w-full items-center gap-2.5 rounded-lg px-2 py-2 text-left transition hover:bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inverse focus-visible:ring-offset-2"
+        aria-label={collapsed ? displayName : undefined}
+        className={`flex w-full items-center gap-2.5 rounded-lg py-2 text-left transition hover:bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inverse focus-visible:ring-offset-2 ${
+          collapsed ? "justify-center px-0" : "px-2"
+        }`}
       >
         <Avatar name={displayName} />
-        <span className="min-w-0 flex-1 truncate text-sm font-medium text-ink">
-          {displayName}
-        </span>
-        <MoreIcon size={16} className="shrink-0 text-faint" />
+        {collapsed ? null : (
+          <>
+            <span className="min-w-0 flex-1 truncate text-sm font-medium text-ink">
+              {displayName}
+            </span>
+            <MoreIcon size={16} className="shrink-0 text-faint" />
+          </>
+        )}
       </button>
     </div>
   );
