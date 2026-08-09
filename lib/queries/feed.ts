@@ -1,8 +1,10 @@
 import {
   and,
   arrayContains,
+  asc,
   desc,
   eq,
+  gt,
   lt,
   sql,
   or,
@@ -47,9 +49,19 @@ export function parseFeedCursor(value: string | null | undefined) {
   return { createdAt, id };
 }
 
+export const FEED_SORTS = ["new", "old"] as const;
+export type FeedSort = (typeof FEED_SORTS)[number];
+
+/** Anything that is not a known sort becomes "new" — never trust the URL. */
+export function parseFeedSort(value: string | null | undefined): FeedSort {
+  return FEED_SORTS.includes(value as FeedSort) ? (value as FeedSort) : "new";
+}
+
 type GetFeedPageOptions = {
   groupId: string;
   tag?: string | null;
+  authorId?: string | null;
+  sort?: FeedSort;
   cursor?: string | null;
   limit?: number;
 };
@@ -57,17 +69,24 @@ type GetFeedPageOptions = {
 export async function getFeedPage({
   groupId,
   tag,
+  authorId,
+  sort = "new",
   cursor,
   limit = 30,
 }: GetFeedPageOptions) {
   const safeLimit = Math.max(1, Math.min(limit, 100));
   const parsedCursor = parseFeedCursor(cursor);
+  const ascending = sort === "old";
+
+  // The keyset predicate MUST mirror the ORDER BY. Comparing with lt while ordering
+  // ascending walks the wrong direction and silently repeats or skips whole pages.
+  const compare = ascending ? gt : lt;
   const cursorPredicate = parsedCursor
     ? or(
-        lt(posts.createdAt, parsedCursor.createdAt),
+        compare(posts.createdAt, parsedCursor.createdAt),
         and(
           eq(posts.createdAt, parsedCursor.createdAt),
-          lt(posts.id, parsedCursor.id),
+          compare(posts.id, parsedCursor.id),
         ),
       )
     : undefined;
@@ -97,10 +116,14 @@ export async function getFeedPage({
       and(
         eq(posts.groupId, groupId),
         tag ? arrayContains(posts.tags, [tag]) : undefined,
+        authorId ? eq(posts.authorId, authorId) : undefined,
         cursorPredicate,
       ),
     )
-    .orderBy(desc(posts.createdAt), desc(posts.id))
+    .orderBy(
+      ascending ? asc(posts.createdAt) : desc(posts.createdAt),
+      ascending ? asc(posts.id) : desc(posts.id),
+    )
     .limit(safeLimit + 1);
 
   const hasMore = rows.length > safeLimit;

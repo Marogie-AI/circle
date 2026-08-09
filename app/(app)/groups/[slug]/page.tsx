@@ -2,16 +2,15 @@ import Link from "next/link";
 import { PageHeader, buttonStyles } from "@/components/page-header";
 import {
   ClearIcon,
-  CommentIcon,
   InviteIcon,
   PlusIcon,
-  ReactionIcon,
   SearchIcon,
 } from "@/components/icons";
+import { FeedFilters } from "@/components/feed-filters";
 import { MarkSeen } from "@/components/mark-seen";
 import { SaveButton } from "@/components/save-button";
-import { getFeedPage } from "@/lib/queries/feed";
-import { countMembers } from "@/lib/queries/groups";
+import { getFeedPage, parseFeedSort } from "@/lib/queries/feed";
+import { listGroupMembers, listTagFacets } from "@/lib/queries/groups";
 import { getLastSeen, markGroupSeen } from "@/lib/queries/reads";
 import { savedIdsFor } from "@/lib/queries/saved";
 import { searchGroupPosts } from "@/lib/queries/search";
@@ -22,6 +21,8 @@ type GroupPageProps = {
   params: Promise<{ slug: string }>;
   searchParams: Promise<{
     tag?: string | string[];
+    author?: string | string[];
+    sort?: string | string[];
     before?: string | string[];
     q?: string | string[];
   }>;
@@ -31,18 +32,6 @@ function first(value: string | string[] | undefined) {
   return Array.isArray(value) ? value[0] : value;
 }
 
-function postDate(date: Date) {
-  const elapsedDays = Math.floor((Date.now() - date.getTime()) / 86_400_000);
-  if (elapsedDays <= 0) return "Today";
-  if (elapsedDays === 1) return "Yesterday";
-  if (elapsedDays < 7) return `${elapsedDays} days ago`;
-  return date.toLocaleDateString(undefined, {
-    month: "short",
-    day: "numeric",
-    year: date.getFullYear() === new Date().getFullYear() ? undefined : "numeric",
-  });
-}
-
 export default async function GroupPage({ params, searchParams }: GroupPageProps) {
   const { slug } = await params;
   const { group, user } = await requireMember(slug);
@@ -50,18 +39,31 @@ export default async function GroupPage({ params, searchParams }: GroupPageProps
   const tag = first(query.tag)?.trim() || null;
   const before = first(query.before) || null;
   const q = first(query.q)?.trim() || null;
+  const sort = parseFeedSort(first(query.sort));
+  const requestedAuthor = first(query.author)?.trim() || null;
 
-  const [memberCount, lastSeen] = await Promise.all([
-    countMembers(group.id),
+  const [lastSeen, members, tagFacets] = await Promise.all([
     getLastSeen(group.id, user.id),
+    listGroupMembers(group.id),
+    listTagFacets(group.id),
   ]);
+
+  // An author id from the URL is only honoured if it belongs to this group. Otherwise a
+  // crafted ?author= would be a (harmless, but pointless) probe against other users.
+  const author = members.find((member) => member.id === requestedAuthor) ?? null;
 
   // Searching replaces the feed; the two never combine, so the empty states can be
   // specific about which one you're looking at.
   const searchHits = q ? await searchGroupPosts({ groupId: group.id, query: q }) : null;
   const feed = q
     ? null
-    : await getFeedPage({ groupId: group.id, tag, cursor: before });
+    : await getFeedPage({
+        groupId: group.id,
+        tag,
+        authorId: author?.id ?? null,
+        sort,
+        cursor: before,
+      });
 
   const rows = q
     ? (searchHits ?? []).map((hit) => ({
@@ -78,12 +80,30 @@ export default async function GroupPage({ params, searchParams }: GroupPageProps
 
   const savedIds = await savedIdsFor(user.id, rows.map((r) => r.id));
 
+  // Every active filter has to ride along, or page 2 quietly resets them.
   const loadMoreParams = new URLSearchParams();
   if (tag) loadMoreParams.set("tag", tag);
+  if (author) loadMoreParams.set("author", author.id);
+  if (sort !== "new") loadMoreParams.set("sort", sort);
   if (feed?.nextCursor) loadMoreParams.set("before", feed.nextCursor);
 
+  /** URL with one filter dropped, for the dismiss buttons on the chips. */
+  function urlWithout(key: "tag" | "author") {
+    const next = new URLSearchParams();
+    if (tag && key !== "tag") next.set("tag", tag);
+    if (author && key !== "author") next.set("author", author.id);
+    if (sort !== "new") next.set("sort", sort);
+    const queryString = next.toString();
+    return queryString ? `/groups/${slug}?${queryString}` : `/groups/${slug}`;
+  }
+
+  const chip =
+    "inline-flex items-center gap-1.5 rounded-full bg-inverse px-2.5 py-0.5 text-xs font-medium text-inverse-ink";
+  const chipDismiss =
+    "rounded-full text-faint transition hover:text-inverse-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white";
+
   return (
-    <main className="min-h-screen w-full px-6 py-10 sm:px-10 sm:py-12">
+    <main className="min-h-full w-full min-w-0 px-6 pb-10 pt-9 sm:px-10 sm:pb-12">
       {/* clears the unread badge only after this render has painted */}
       <MarkSeen
         mark={async () => {
@@ -98,14 +118,25 @@ export default async function GroupPage({ params, searchParams }: GroupPageProps
         title={group.name}
         meta={
           <>
-            <span>{memberCount === 1 ? "1 member" : `${memberCount} members`}</span>
             {tag ? (
-              <span className="inline-flex items-center gap-1.5 rounded-full bg-inverse px-2.5 py-0.5 text-xs font-medium text-inverse-ink">
+              <span className={chip}>
                 #{tag}
                 <Link
-                  href={`/groups/${slug}`}
+                  href={urlWithout("tag")}
                   aria-label={`Clear the ${tag} filter`}
-                  className="rounded-full text-faint transition hover:text-inverse-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
+                  className={chipDismiss}
+                >
+                  <ClearIcon size={13} />
+                </Link>
+              </span>
+            ) : null}
+            {author ? (
+              <span className={chip}>
+                {author.name}
+                <Link
+                  href={urlWithout("author")}
+                  aria-label={`Clear the ${author.name} filter`}
+                  className={chipDismiss}
                 >
                   <ClearIcon size={13} />
                 </Link>
@@ -127,7 +158,10 @@ export default async function GroupPage({ params, searchParams }: GroupPageProps
         }
       />
 
-      <form method="get" className="mt-6 flex items-center gap-2">
+      <form method="get" className="mt-6 flex flex-wrap items-center gap-4">
+        {/* Searching replaces the feed entirely, so the feed's own filters would be
+            lying about what is on screen. They come back when the search clears. */}
+        {tag ? <input type="hidden" name="tag" value={tag} /> : null}
         <div className="relative min-w-0 flex-1 sm:max-w-sm">
           <SearchIcon
             size={16}
@@ -141,25 +175,42 @@ export default async function GroupPage({ params, searchParams }: GroupPageProps
             className="w-full rounded-lg border border-line bg-surface py-2 pl-9 pr-3 text-sm outline-none transition placeholder:text-faint focus:border-inverse focus:ring-2 focus:ring-inverse/10"
           />
         </div>
+        {/* A real submit button, hidden. Without one, pressing Enter in the search
+            field did nothing: implicit submission stops once the form holds controls
+            besides the single text input, and this form also carries the filters. */}
+        <button type="submit" className="sr-only">
+          Search
+        </button>
         {q ? (
           <Link href={`/groups/${slug}`} className={buttonStyles.secondary}>
             Clear
           </Link>
-        ) : null}
+        ) : (
+          <FeedFilters slug={slug} members={members} tags={tagFacets} />
+        )}
       </form>
 
       <section className="pb-10">
         {rows.length ? (
           <div className="mt-6 overflow-hidden rounded-2xl border border-line bg-surface shadow-sm">
             <div className="min-w-0 overflow-x-auto">
-              <table className="w-full min-w-[720px] table-fixed border-collapse text-left text-sm">
-                <thead className="border-b border-line text-xs font-medium uppercase tracking-wide text-muted">
+              <table className="w-full table-fixed sm:min-w-[720px] border-collapse text-left text-sm">
+                <thead className="text-xs font-medium uppercase tracking-wide text-muted">
                   <tr>
-                    <th scope="col" className="w-[44%] px-5 py-3 font-medium">Title</th>
-                    <th scope="col" className="w-[19%] px-3 py-3 font-medium">Tags</th>
-                    <th scope="col" className="w-[12%] px-3 py-3 font-medium">Author</th>
-                    <th scope="col" className="w-[9%] px-3 py-3 font-medium">When</th>
-                    <th scope="col" className="w-[16%] px-5 py-3 text-right font-medium">Counts</th>
+                    {/* pl-9 = px-5 (20px) + the unread dot (6px) + its gap (10px), so
+                        the heading sits over the title text rather than over the dot. */}
+                    {/* Widths differ by breakpoint: on a phone the tag column is gone,
+                        so title and author split the space the tags gave up. */}
+                    <th scope="col" className="w-[64%] py-3 pl-9 pr-5 font-medium sm:w-[52%]">
+                      Title
+                    </th>
+                    <th scope="col" className="hidden w-[28%] px-3 py-3 font-medium sm:table-cell">Tags</th>
+                    <th scope="col" className="w-[24%] px-3 py-3 font-medium sm:w-[14%]">Author</th>
+                    {/* Save control keeps its column but not a label — "Saved" as a
+                        heading would read as a filter rather than a per-row toggle. */}
+                    <th scope="col" className="w-[12%] px-3 py-3 sm:w-[6%] sm:px-5">
+                      <span className="sr-only">Saved</span>
+                    </th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-hairline">
@@ -189,6 +240,7 @@ export default async function GroupPage({ params, searchParams }: GroupPageProps
                             ) : null}
                             <Link
                               href={`/groups/${slug}/p/${post.id}`}
+              prefetch
                               title={post.title}
                               className="block min-w-0 flex-1 truncate font-medium text-ink underline-offset-4 group-hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inverse focus-visible:ring-offset-2"
                             >
@@ -196,7 +248,7 @@ export default async function GroupPage({ params, searchParams }: GroupPageProps
                             </Link>
                           </div>
                         </td>
-                        <td className="px-3 py-4">
+                        <td className="hidden px-3 py-4 sm:table-cell">
                           <div className="flex min-w-0 flex-wrap gap-1">
                             {post.tags.map((postTag) => (
                               <Link
@@ -210,30 +262,14 @@ export default async function GroupPage({ params, searchParams }: GroupPageProps
                           </div>
                         </td>
                         <td className="truncate px-3 py-4 text-muted">{post.authorName}</td>
-                        <td className="whitespace-nowrap px-3 py-4 text-muted">
-                          {postDate(post.createdAt)}
-                        </td>
-                        <td className="whitespace-nowrap px-5 py-4 text-right text-muted">
-                          <span className="inline-flex items-center gap-2.5">
-                            {!q ? (
-                              <span className="tabular-nums">
-                                <span className={`inline-flex items-center gap-1 ${post.commentCount ? "text-muted" : "text-faint"}`}>
-                                  <CommentIcon size={14} /> {post.commentCount}
-                                </span>
-                                <span className="mx-2 text-faint">·</span>
-                                <span className={`inline-flex items-center gap-1 ${post.reactionCount ? "text-muted" : "text-faint"}`}>
-                                  <ReactionIcon size={14} /> {post.reactionCount}
-                                </span>
-                              </span>
-                            ) : null}
-                            <SaveButton
-                              saved={savedIds.has(post.id)}
-                              onToggle={async () => {
-                                "use server";
-                                await toggleSaved(slug, post.id);
-                              }}
-                            />
-                          </span>
+                        <td className="whitespace-nowrap px-3 py-4 text-right text-muted sm:px-5">
+                          <SaveButton
+                            saved={savedIds.has(post.id)}
+                            onToggle={async () => {
+                              "use server";
+                              await toggleSaved(slug, post.id);
+                            }}
+                          />
                         </td>
                       </tr>
                     );
@@ -254,7 +290,7 @@ export default async function GroupPage({ params, searchParams }: GroupPageProps
             ) : null}
           </div>
         ) : (
-          <div className="mt-6 rounded-2xl border border-dashed border-line bg-surface px-6 py-14 text-center">
+          <div className="mt-6 rounded-2xl border border-dashed border-line px-6 py-14 text-center">
             <h2 className="font-semibold tracking-tight text-ink">
               {q
                 ? `No results for “${q}”`

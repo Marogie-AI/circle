@@ -1,6 +1,6 @@
-import { desc, eq, sql } from "drizzle-orm";
+import { asc, desc, eq, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { groups, memberships, posts } from "@/db/schema";
+import { groups, memberships, posts, user } from "@/db/schema";
 
 /**
  * How many groups the sidebar shows, and therefore how many the unread query counts.
@@ -30,6 +30,20 @@ export async function listGroupsForUser(userId: string) {
 }
 
 export type UserGroup = Awaited<ReturnType<typeof listGroupsForUser>>[number];
+
+/**
+ * Members of one group, join order. Feeds the author filter on the group page.
+ * Covered by the memberships primary key (group_id, user_id).
+ */
+export async function listGroupMembers(groupId: string) {
+  return db
+    .select({ id: user.id, name: user.name })
+    .from(memberships)
+    .innerJoin(user, eq(user.id, memberships.userId))
+    .where(eq(memberships.groupId, groupId))
+    .orderBy(asc(memberships.joinedAt))
+    .limit(200);
+}
 
 /** Member count for a group. Cheap: covered by the memberships primary key. */
 export async function countMembers(groupId: string) {
