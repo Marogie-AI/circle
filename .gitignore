@@ -4,4 +4,11 @@ node_modules/
 .env*.local
 *.tsbuildinfo
 next-env.d.ts
-public/logo.png
+apps/web/public/logo.png
+
+# Flutter
+.dart_tool/
+build/
+.flutter-plugins
+.flutter-plugins-dependencies
+apps/mobile/.packages
