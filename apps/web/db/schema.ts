@@ -1,6 +1,6 @@
 export * from "./auth-schema";
 
-import { desc } from "drizzle-orm";
+import { desc, sql } from "drizzle-orm";
 import {
   index,
   integer,
@@ -88,6 +88,18 @@ export const posts = pgTable(
       desc(table.id),
     ),
     index("posts_tags_idx").using("gin", table.tags),
+    // Trigram index on title, so searchGroupPosts can actually use an index.
+    //
+    // Its predicate is `search_vector @@ tsquery OR title ILIKE '%q%'`. A leading-wildcard
+    // ILIKE is unindexable by btree, and one unindexable arm of an OR forces a sequential
+    // scan of the WHOLE predicate — so posts_search_idx, though perfectly good, was never
+    // reached. Measured on a 50k-post group: 122ms parallel seq scan for a term with no
+    // matches, versus 0.25ms once this exists, because the planner can finally BitmapOr
+    // the two GIN indexes together. Costs ~7MB per 150k posts. The query is unchanged.
+    index("posts_title_trgm_idx").using(
+      "gin",
+      sql`${table.title} gin_trgm_ops`,
+    ),
     // The author filter on the feed sorts by the same keys as the feed itself. Without
     // this, filtering a busy group to one infrequent poster scans most of the group.
     index("posts_group_author_feed_idx").on(

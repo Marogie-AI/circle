@@ -25,9 +25,17 @@ export type SearchHit = {
  * (`un` is not the lexeme `unreasonable`, so it never matches). Typing half a title
  * and getting "No results" reads as a broken search box.
  *
- * ponytail: leading-wildcard ILIKE cannot use a btree index, so this scans the group's
- * titles. Bounded by group_id and by LIMIT, which is fine at this size; if a single
- * group ever gets huge, add a pg_trgm GIN index on title and this query stays as-is.
+ * That ILIKE arm used to make this query unindexable, and it was worse than "scans the
+ * group's titles": a leading wildcard cannot use a btree, and ONE unindexable arm of an
+ * OR forces a sequential scan of the whole predicate — so posts_search_idx, though
+ * perfectly good, was never reached at all. Measured on a 50k-post group: 122 ms of
+ * parallel seq scan for a term with no matches, against 0.6 ms for the tsquery arm alone.
+ *
+ * posts_title_trgm_idx (migration 0005) fixes it without touching this query: the planner
+ * can now BitmapOr the two GIN indexes together. Same case, 0.25 ms.
+ *
+ * Keep both arms AND both indexes. Dropping either arm loses real searches; dropping the
+ * trigram index silently restores the seq scan, and nothing here will look different.
  *
  * groupId is ALWAYS AND-ed in, so a search can never surface another group's posts.
  */
