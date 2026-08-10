@@ -12,3 +12,4 @@ build/
 .flutter-plugins
 .flutter-plugins-dependencies
 apps/mobile/.packages
+.vercel
