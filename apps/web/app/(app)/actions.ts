@@ -6,6 +6,7 @@ import { groups, memberships, user } from "@/db/schema";
 import { db } from "@/db";
 import { requireSession } from "@/lib/guard";
 import { allow } from "@/lib/rate-limit";
+import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
 const MAX_CREATE_ATTEMPTS = 4;
@@ -110,5 +111,7 @@ export async function createGroup(formData: FormData) {
     throw new Error("Unable to create a unique group slug.");
   }
 
+  revalidatePath("/groups");
+  revalidatePath("/", "layout");
   redirect(`/groups/${createdSlug}`);
 }

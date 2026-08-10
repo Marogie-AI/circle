@@ -170,19 +170,38 @@ export function PostForm({ slug, post }: { slug: string; post?: PostDraft }) {
         </p>
       ) : null}
 
-      <button
-        type="submit"
-        disabled={pending}
-        className="w-full rounded-lg bg-inverse px-4 py-2.5 text-sm font-medium text-inverse-ink transition hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inverse focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
-      >
-        {pending
-          ? post
-            ? "Saving…"
-            : "Publishing…"
-          : post
-            ? "Save changes"
-            : "Publish post"}
-      </button>
+      <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+        {!post ? (
+          // Same form, different intent — the button's name/value rides along in the
+          // FormData, and createPost branches on it.
+          <button
+            type="submit"
+            name="intent"
+            value="draft"
+            // A draft must save even when the required title/body are blank.
+            formNoValidate
+            disabled={pending}
+            className="rounded-lg border border-line bg-surface px-4 py-2.5 text-sm font-medium text-ink transition hover:bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inverse focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {pending ? "Saving…" : "Save draft"}
+          </button>
+        ) : null}
+        <button
+          type="submit"
+          name="intent"
+          value="publish"
+          disabled={pending}
+          className="rounded-lg bg-inverse px-4 py-2.5 text-sm font-medium text-inverse-ink transition hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inverse focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {pending
+            ? post
+              ? "Saving…"
+              : "Publishing…"
+            : post
+              ? "Save changes"
+              : "Publish post"}
+        </button>
+      </div>
     </form>
   );
 }

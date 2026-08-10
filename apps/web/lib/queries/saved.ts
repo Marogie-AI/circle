@@ -41,6 +41,7 @@ export async function listSavedPosts(userId: string): Promise<SavedPost[]> {
     JOIN "user" u      ON u.id = p.author_id
     JOIN memberships m ON m.group_id = p.group_id AND m.user_id = ${userId}
     WHERE s.user_id = ${userId}
+      AND p.status = 'published'
     ORDER BY s.created_at DESC
     LIMIT 200
   `);

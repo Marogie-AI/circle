@@ -5,6 +5,7 @@ import {
   desc,
   eq,
   gt,
+  isNotNull,
   lt,
   sql,
   or,
@@ -115,6 +116,8 @@ export async function getFeedPage({
     .where(
       and(
         eq(posts.groupId, groupId),
+        // Drafts are author-private and never surface in the feed.
+        eq(posts.status, "published"),
         tag ? arrayContains(posts.tags, [tag]) : undefined,
         authorId ? eq(posts.authorId, authorId) : undefined,
         cursorPredicate,
@@ -138,4 +141,56 @@ export async function getFeedPage({
         ? encodeFeedCursor({ createdAt: last.createdAt, id: last.id })
         : null,
   };
+}
+
+/**
+ * Pinned posts for the top-of-feed strip. Kept out of getFeedPage so the keyset
+ * pagination there stays monotonic on createdAt/id. Same row shape as the feed items.
+ */
+export async function getPinnedPosts(groupId: string, limit = 10) {
+  return db
+    .select({
+      id: posts.id,
+      title: posts.title,
+      tags: posts.tags,
+      createdAt: posts.createdAt,
+      authorName: user.name,
+      ogImage: posts.ogImage,
+      commentCount: sql<number>`(
+        SELECT count(*)::int FROM ${comments} WHERE ${comments.postId} = ${posts.id}
+      )`.as("comment_count"),
+      reactionCount: sql<number>`(
+        SELECT count(*)::int FROM ${reactions} WHERE ${reactions.postId} = ${posts.id}
+      )`.as("reaction_count"),
+    })
+    .from(posts)
+    .innerJoin(user, eq(user.id, posts.authorId))
+    .where(
+      and(
+        eq(posts.groupId, groupId),
+        eq(posts.status, "published"),
+        isNotNull(posts.pinnedAt),
+      ),
+    )
+    .orderBy(desc(posts.pinnedAt))
+    .limit(limit);
+}
+
+/** A member's own drafts in a group — never visible to anyone else. */
+export async function getDrafts(groupId: string, authorId: string) {
+  return db
+    .select({
+      id: posts.id,
+      title: posts.title,
+      createdAt: posts.createdAt,
+    })
+    .from(posts)
+    .where(
+      and(
+        eq(posts.groupId, groupId),
+        eq(posts.authorId, authorId),
+        eq(posts.status, "draft"),
+      ),
+    )
+    .orderBy(desc(posts.createdAt));
 }

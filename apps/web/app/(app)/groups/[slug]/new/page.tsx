@@ -11,7 +11,7 @@ export default async function NewPostPage({ params }: NewPostPageProps) {
   return (
     // pt-9 puts the back link's optical centre on the sidebar wordmark's:
     // 12px rail padding + 20px card padding + half of the 28px logo.
-    <main className="mx-auto min-h-full w-full max-w-4xl px-6 pb-10 pt-9 sm:pb-14">
+    <main className="min-h-full w-full px-6 pb-10 pt-9 sm:px-10 sm:pb-14">
       <header>
         <Link href={`/groups/${slug}`} className="text-sm font-medium text-muted transition hover:text-ink">← Back to {group.name}</Link>
       </header>

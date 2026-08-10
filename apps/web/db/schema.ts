@@ -16,6 +16,8 @@ export const groups = pgTable("groups", {
   id: uuid("id").primaryKey().defaultRandom(),
   name: text("name").notNull(),
   slug: text("slug").notNull().unique(),
+  description: text("description"),
+  coverUrl: text("cover_url"),
   createdBy: text("created_by")
     .notNull()
     .references(() => user.id),
@@ -71,6 +73,10 @@ export const posts = pgTable(
     body: text("body").notNull(),
     url: text("url"),
     tags: text("tags").array().notNull().default([]),
+    // 'published' | 'draft'. Drafts are visible only to their author, never in the feed.
+    status: text("status").notNull().default("published"),
+    // Owner-pinned posts sort to the top of the feed. Null = not pinned.
+    pinnedAt: timestamp("pinned_at"),
     // Open Graph metadata for the link card. Nullable: a preview is best-effort and
     // must never block or fail posting. ogFetchedAt records that we tried.
     ogTitle: text("og_title"),
@@ -146,6 +152,58 @@ export const reactions = pgTable(
   },
   (table) => [
     primaryKey({ columns: [table.postId, table.userId, table.emoji] }),
+  ],
+);
+
+/**
+ * In-app notifications. One row per (recipient, event). `type` is
+ * 'comment' | 'reaction' | 'new_post' | 'mention'. postId/commentId are nullable so the
+ * row can point at whatever the event is about. readAt null = unread (partial index).
+ */
+export const notifications = pgTable(
+  "notifications",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    actorId: text("actor_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    type: text("type").notNull(),
+    groupId: uuid("group_id")
+      .notNull()
+      .references(() => groups.id, { onDelete: "cascade" }),
+    postId: uuid("post_id").references(() => posts.id, { onDelete: "cascade" }),
+    commentId: uuid("comment_id").references(() => comments.id, {
+      onDelete: "cascade",
+    }),
+    readAt: timestamp("read_at"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (table) => [
+    index("notifications_user_idx").on(table.userId, desc(table.createdAt)),
+    index("notifications_user_unread_idx")
+      .on(table.userId)
+      .where(sql`${table.readAt} is null`),
+  ],
+);
+
+/** Emoji reactions on comments — mirrors `reactions`, keyed on the comment instead. */
+export const commentReactions = pgTable(
+  "comment_reactions",
+  {
+    commentId: uuid("comment_id")
+      .notNull()
+      .references(() => comments.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    emoji: text("emoji").notNull(),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.commentId, table.userId, table.emoji] }),
   ],
 );
 

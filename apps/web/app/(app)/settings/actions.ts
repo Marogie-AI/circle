@@ -2,6 +2,9 @@
 
 import { headers } from "next/headers";
 import { revalidatePath } from "next/cache";
+import { eq } from "drizzle-orm";
+import { db } from "@/db";
+import { user } from "@/db/schema";
 import { auth } from "@/lib/auth";
 import { requireSession } from "@/lib/guard";
 
@@ -24,6 +27,28 @@ export async function updateDisplayName(
   // the name is rendered in avatars, post bylines and comments across the app
   revalidatePath("/", "layout");
   return { ok: "Name updated." };
+}
+
+export async function updateBio(
+  _prev: SettingsState,
+  formData: FormData,
+): Promise<SettingsState> {
+  const session = await requireSession();
+  const bio = String(formData.get("bio") ?? "").trim();
+  if (bio.length > 200) {
+    return { error: "Bio must be 200 characters or fewer." };
+  }
+
+  // Bio isn't part of better-auth's session, so write the user row directly. Store null
+  // rather than "" for an empty bio, so the profile page's "no bio" check is a plain null.
+  await db
+    .update(user)
+    .set({ bio: bio || null })
+    .where(eq(user.id, session.user.id));
+
+  // shown on the public /u/[id] profile
+  revalidatePath("/", "layout");
+  return { ok: "Bio updated." };
 }
 
 export async function changePassword(

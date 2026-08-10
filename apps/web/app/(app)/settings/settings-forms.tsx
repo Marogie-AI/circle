@@ -3,6 +3,7 @@
 import { useActionState } from "react";
 import {
   changePassword,
+  updateBio,
   updateDisplayName,
   type SettingsState,
 } from "@/app/(app)/settings/actions";
@@ -57,6 +58,36 @@ export function DisplayNameForm({ initialName }: { initialName: string }) {
       <Feedback state={state} />
       <button type="submit" disabled={pending} className={submitClass}>
         {pending ? "Saving…" : "Save name"}
+      </button>
+    </form>
+  );
+}
+
+export function BioForm({ initialBio }: { initialBio: string }) {
+  const [state, action, pending] = useActionState(updateBio, EMPTY);
+
+  return (
+    <form action={action} className="mt-5 space-y-4">
+      <div>
+        <label htmlFor="bio" className="mb-1.5 block text-sm font-medium text-ink">
+          Bio
+        </label>
+        <textarea
+          id="bio"
+          name="bio"
+          rows={3}
+          maxLength={200}
+          defaultValue={initialBio}
+          disabled={pending}
+          className={`${inputClass} resize-none`}
+        />
+        <p className="mt-1.5 text-xs text-muted">
+          A short line about you, shown on your profile. Up to 200 characters.
+        </p>
+      </div>
+      <Feedback state={state} />
+      <button type="submit" disabled={pending} className={submitClass}>
+        {pending ? "Saving…" : "Save bio"}
       </button>
     </form>
   );

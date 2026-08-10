@@ -3,10 +3,25 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { addComment, deleteComment, deletePost, toggleReaction } from "@/app/(app)/groups/[slug]/actions";
+import {
+  addComment,
+  deleteComment,
+  deletePost,
+  pinPost,
+  publishDraft,
+  toggleCommentReaction,
+  toggleReaction,
+  unpinPost,
+} from "@/app/(app)/groups/[slug]/actions";
 import { toggleSaved } from "@/app/(app)/saved/actions";
 import { db } from "@/db";
-import { comments, posts, reactions, user as users } from "@/db/schema";
+import {
+  commentReactions,
+  comments,
+  posts,
+  reactions,
+  user as users,
+} from "@/db/schema";
 import { buttonStyles } from "@/components/page-header";
 import { BackIcon, PlusIcon } from "@/components/icons";
 import { ReactionBar } from "@/components/reaction-bar";
@@ -46,6 +61,8 @@ export default async function PostPage({ params }: PostPageProps) {
       updatedAt: posts.updatedAt,
       createdAt: posts.createdAt,
       authorId: posts.authorId,
+      status: posts.status,
+      pinnedAt: posts.pinnedAt,
       ogTitle: posts.ogTitle,
       ogDescription: posts.ogDescription,
       ogImage: posts.ogImage,
@@ -58,8 +75,19 @@ export default async function PostPage({ params }: PostPageProps) {
     .limit(1);
 
   if (!post) notFound();
+  // Drafts are private to their author. Everyone else gets a 404 — never a "you can't
+  // see this", which would leak that a draft exists.
+  if (post.status === "draft" && post.authorId !== user.id) notFound();
 
-  const [commentRows, reactionCounts, currentUserReactions, reactorRows, saved] = await Promise.all([
+  const [
+    commentRows,
+    reactionCounts,
+    currentUserReactions,
+    reactorRows,
+    saved,
+    commentReactionCounts,
+    myCommentReactions,
+  ] = await Promise.all([
     db
       .select({
         id: comments.id,
@@ -98,9 +126,49 @@ export default async function PostPage({ params }: PostPageProps) {
     // In the same batch: it only needs post.id and user.id, both already known, so
     // awaiting it separately was one more sequential round-trip for nothing.
     isSaved(user.id, post.id),
+    // Reaction counts per comment on this post, and which are mine — joined through
+    // comments so the whole set comes back in one grouped query.
+    db
+      .select({
+        commentId: commentReactions.commentId,
+        emoji: commentReactions.emoji,
+        count: count(),
+      })
+      .from(commentReactions)
+      .innerJoin(comments, eq(comments.id, commentReactions.commentId))
+      .where(eq(comments.postId, post.id))
+      .groupBy(commentReactions.commentId, commentReactions.emoji),
+    db
+      .select({
+        commentId: commentReactions.commentId,
+        emoji: commentReactions.emoji,
+      })
+      .from(commentReactions)
+      .innerJoin(comments, eq(comments.id, commentReactions.commentId))
+      .where(
+        and(
+          eq(comments.postId, post.id),
+          eq(commentReactions.userId, user.id),
+        ),
+      ),
   ]);
   const counts = new Map(reactionCounts.map((row) => [row.emoji, row.count]));
   const selected = new Set(currentUserReactions.map((row) => row.emoji));
+
+  // Per-comment reaction lookups: commentId -> { emoji: count } and commentId -> [mine].
+  const commentCounts = new Map<string, Record<string, number>>();
+  for (const row of commentReactionCounts) {
+    const bucket = commentCounts.get(row.commentId) ?? {};
+    bucket[row.emoji] = row.count;
+    commentCounts.set(row.commentId, bucket);
+  }
+  const commentMine = new Map<string, string[]>();
+  for (const row of myCommentReactions) {
+    commentMine.set(row.commentId, [
+      ...(commentMine.get(row.commentId) ?? []),
+      row.emoji,
+    ]);
+  }
   const reactorNames = [...new Set(reactorRows.map((row) => row.name))];
   // presentational only — the actions re-check this in their own WHERE clause
   const canManagePost = role === "owner" || post.authorId === user.id;
@@ -122,6 +190,25 @@ export default async function PostPage({ params }: PostPageProps) {
               await toggleSaved(slug, post.id);
             }}
           />
+          {role === "owner" && post.status !== "draft" ? (
+            <form
+              action={async () => {
+                "use server";
+                if (post.pinnedAt) {
+                  await unpinPost(slug, post.id);
+                } else {
+                  await pinPost(slug, post.id);
+                }
+              }}
+            >
+              <SubmitButton
+                pendingLabel={post.pinnedAt ? "Unpinning…" : "Pinning…"}
+                className={`${buttonStyles.secondary}`}
+              >
+                {post.pinnedAt ? "Unpin" : "Pin"}
+              </SubmitButton>
+            </form>
+          ) : null}
           <Link href={`/groups/${slug}/new`} className={`${buttonStyles.secondary} gap-1.5`}>
             <PlusIcon size={16} />
             <span className="hidden sm:inline">New post</span>
@@ -137,6 +224,23 @@ export default async function PostPage({ params }: PostPageProps) {
           ) : null}
         </div>
       </header>
+
+      {post.status === "draft" ? (
+        <div className="mt-5 flex flex-col gap-3 rounded-xl border border-dashed border-line bg-canvas px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+          <p className="text-sm text-muted">
+            <span className="font-medium text-ink">Draft</span> — only you can see this. Publishing
+            shares it with the group.
+          </p>
+          <form action={publishDraft.bind(null, slug, post.id)}>
+            <SubmitButton
+              pendingLabel="Publishing…"
+              className="rounded-lg bg-inverse px-4 py-2 text-sm font-medium text-inverse-ink transition hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inverse focus-visible:ring-offset-2"
+            >
+              Publish
+            </SubmitButton>
+          </form>
+        </div>
+      ) : null}
 
       {/* P2: body keeps a reading measure on the left, reactions + comments ride a
           sticky rail on the right. Stacks to one column below lg. */}
@@ -178,7 +282,7 @@ export default async function PostPage({ params }: PostPageProps) {
               h3: ({ children }) => <h3 className="mb-2 mt-6 text-lg font-semibold text-ink">{children}</h3>,
               p: ({ children }) => <p className="my-4">{children}</p>,
               a: ({ children, href }) => <a href={href} target="_blank" rel="noopener noreferrer" className="font-medium text-ink underline underline-offset-4">{children}</a>,
-              ul: ({ children }) => <ul className="my-4 list-disc space-y-1 pl-6">{children}</ul>,
+              ul: ({ children }) => <ul className="md-bullets my-4 space-y-1 pl-6">{children}</ul>,
               ol: ({ children }) => <ol className="my-4 list-decimal space-y-1 pl-6">{children}</ol>,
               blockquote: ({ children }) => <blockquote className="my-5 border-l-2 border-line pl-4 text-muted">{children}</blockquote>,
               code: ({ children }) => <code className="rounded bg-rail px-1.5 py-0.5 text-sm text-ink">{children}</code>,
@@ -236,12 +340,22 @@ export default async function PostPage({ params }: PostPageProps) {
             {commentRows.map((comment) => (
               <li key={comment.id} className="flex gap-2.5 py-4">
                 <Avatar name={comment.authorName} size="sm" className="mt-0.5" />
-                <div className="min-w-0">
+                <div className="min-w-0 flex-1">
                   <p className="text-sm font-medium text-ink">
                     {comment.authorName}{" "}
                     <span className="font-normal text-faint">· {fullDate(comment.createdAt)}</span>
                   </p>
                   <p className="mt-1 whitespace-pre-wrap break-words text-sm leading-6 text-muted">{comment.body}</p>
+                  <div className="mt-2">
+                    <ReactionBar
+                      counts={commentCounts.get(comment.id) ?? {}}
+                      mine={commentMine.get(comment.id) ?? []}
+                      onToggle={async (emoji: string) => {
+                        "use server";
+                        await toggleCommentReaction(slug, post.id, comment.id, emoji);
+                      }}
+                    />
+                  </div>
                 </div>
                 {role === "owner" || comment.authorId === user.id ? (
                   <PostActionsMenu

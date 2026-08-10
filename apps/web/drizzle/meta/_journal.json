@@ -50,6 +50,20 @@
       "when": 1786321770707,
       "tag": "0006_dashing_mojo",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1786372261289,
+      "tag": "0007_tearful_gambit",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1786372610787,
+      "tag": "0008_serious_radioactive_man",
+      "breakpoints": true
     }
   ]
 }

@@ -42,7 +42,7 @@ export function AppSidebar(props: SidebarProps) {
         collapsed ? "w-[84px]" : "w-[284px]"
       }`}
     >
-      <aside className="flex h-full flex-col rounded-2xl border border-line bg-surface shadow-sm">
+      <aside className="sidebar-panel flex h-full flex-col rounded-2xl border border-line bg-surface shadow-sm">
         <SidebarContent
           {...props}
           collapsed={collapsed}

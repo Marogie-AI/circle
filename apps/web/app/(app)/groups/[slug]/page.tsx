@@ -9,7 +9,7 @@ import {
 import { FeedFilters } from "@/components/feed-filters";
 import { MarkSeen } from "@/components/mark-seen";
 import { SaveButton } from "@/components/save-button";
-import { getFeedPage, parseFeedSort } from "@/lib/queries/feed";
+import { getFeedPage, getPinnedPosts, parseFeedSort } from "@/lib/queries/feed";
 import { listGroupMembers, listTagFacets } from "@/lib/queries/groups";
 import { getLastSeen, markGroupSeen } from "@/lib/queries/reads";
 import { savedIdsFor } from "@/lib/queries/saved";
@@ -78,6 +78,11 @@ export default async function GroupPage({ params, searchParams }: GroupPageProps
       }))
     : (feed?.items ?? []);
 
+  // Pinned strip shows only on the plain top-level view — never mid-filter or paginated,
+  // where it would be confusing to see posts that ignore the active filter.
+  const showPinned = !q && !tag && !author && !before;
+  const pinned = showPinned ? await getPinnedPosts(group.id) : [];
+
   const savedIds = await savedIdsFor(user.id, rows.map((r) => r.id));
 
   // Every active filter has to ride along, or page 2 quietly resets them.
@@ -112,6 +117,17 @@ export default async function GroupPage({ params, searchParams }: GroupPageProps
           await markGroupSeen(g.id, u.id);
         }}
       />
+
+      {group.coverUrl ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={group.coverUrl}
+          alt=""
+          loading="lazy"
+          referrerPolicy="no-referrer"
+          className="mb-6 h-32 w-full rounded-2xl border border-line object-cover sm:h-40"
+        />
+      ) : null}
 
       <PageHeader
         eyebrow="Private group"
@@ -150,6 +166,10 @@ export default async function GroupPage({ params, searchParams }: GroupPageProps
               <InviteIcon size={16} />
               <span className="hidden sm:inline">Invite people</span>
             </Link>
+            <Link href={`/groups/${slug}/drafts`} className={`${buttonStyles.secondary} gap-1.5`}>
+              <span className="hidden sm:inline">Drafts</span>
+              <span className="sm:hidden">✎</span>
+            </Link>
             <Link href={`/groups/${slug}/new`} className={`${buttonStyles.primary} gap-1.5`}>
               <PlusIcon size={16} />
               New post
@@ -157,6 +177,10 @@ export default async function GroupPage({ params, searchParams }: GroupPageProps
           </>
         }
       />
+
+      {group.description ? (
+        <p className="mt-3 max-w-2xl text-sm text-muted">{group.description}</p>
+      ) : null}
 
       <form method="get" className="mt-6 flex flex-wrap items-center gap-4">
         {/* Searching replaces the feed entirely, so the feed's own filters would be
@@ -189,6 +213,27 @@ export default async function GroupPage({ params, searchParams }: GroupPageProps
           <FeedFilters slug={slug} members={members} tags={tagFacets} />
         )}
       </form>
+
+      {pinned.length ? (
+        <section aria-label="Pinned posts" className="mt-6">
+          <h2 className="text-xs font-medium uppercase tracking-wide text-muted">Pinned</h2>
+          <ul className="mt-2 divide-y divide-hairline rounded-2xl border border-line bg-surface shadow-sm">
+            {pinned.map((post) => (
+              <li key={post.id}>
+                <Link
+                  href={`/groups/${slug}/p/${post.id}`}
+                  prefetch
+                  className="flex items-center gap-2.5 px-5 py-3 transition hover:bg-hover"
+                >
+                  <span aria-hidden className="shrink-0 text-muted">📌</span>
+                  <span className="min-w-0 flex-1 truncate font-medium text-ink">{post.title}</span>
+                  <span className="shrink-0 truncate text-xs text-muted">{post.authorName}</span>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
 
       <section className="pb-10">
         {rows.length ? (

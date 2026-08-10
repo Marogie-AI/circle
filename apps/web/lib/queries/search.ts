@@ -67,6 +67,7 @@ export async function searchGroupPosts({
     JOIN groups g ON g.id = p.group_id
     JOIN "user" u ON u.id = p.author_id
     WHERE p.group_id = ${groupId}
+      AND p.status = 'published'
       AND (
         p.search_vector @@ websearch_to_tsquery('english', ${trimmed})
         OR p.title ILIKE ${`%${trimmed}%`}
@@ -111,10 +112,11 @@ export async function searchMyPosts({
     JOIN memberships m ON m.group_id = p.group_id AND m.user_id = ${userId}
     -- Same OR-ILIKE arm as searchGroupPosts: the palette is type-ahead, so partial
     -- words are the norm, and full-text alone would show nothing until you finish one.
-    WHERE (
-      p.search_vector @@ websearch_to_tsquery('english', ${trimmed})
-      OR p.title ILIKE ${`%${trimmed}%`}
-    )
+    WHERE p.status = 'published'
+      AND (
+        p.search_vector @@ websearch_to_tsquery('english', ${trimmed})
+        OR p.title ILIKE ${`%${trimmed}%`}
+      )
     ORDER BY ts_rank(p.search_vector, websearch_to_tsquery('english', ${trimmed})) DESC,
              p.created_at DESC
     LIMIT ${limit}

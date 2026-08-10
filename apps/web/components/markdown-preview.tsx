@@ -39,7 +39,7 @@ export function MarkdownPreview({ body }: { body: string }) {
             {children}
           </a>
         ),
-        ul: ({ children }) => <ul className="my-3 list-disc space-y-1 pl-6">{children}</ul>,
+        ul: ({ children }) => <ul className="md-bullets my-3 space-y-1 pl-6">{children}</ul>,
         ol: ({ children }) => (
           <ol className="my-3 list-decimal space-y-1 pl-6">{children}</ol>
         ),

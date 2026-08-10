@@ -2,6 +2,7 @@ const SIZES = {
   xs: "size-5 text-[9px]",
   sm: "size-6 text-[10px]",
   md: "size-8 text-xs",
+  lg: "size-16 text-xl",
 } as const;
 
 /** Initial-circle avatar. Deterministic, no image upload, no external service. */
