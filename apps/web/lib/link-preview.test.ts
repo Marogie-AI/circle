@@ -1,6 +1,48 @@
 import assert from "node:assert/strict";
 import { test } from "bun:test";
-import { assertPublicUrl, safeFetchPreview } from "@/lib/link-preview";
+import {
+  assertPublicUrl,
+  isBlockedAddress,
+  safeFetchPreview,
+} from "@/lib/link-preview";
+
+/**
+ * No DNS, so this verdict is identical on every platform.
+ *
+ * That matters here more than it usually would. The resolvers disagree about how to
+ * spell an IPv4-mapped IPv6 address — macOS rewrites ::ffff:7f00:1 to
+ * ::ffff:127.0.0.1, Linux returns it verbatim — so a URL-level test of the same bug
+ * passes on a developer's Mac while production stays exploitable. This is the test
+ * that actually holds the line.
+ */
+test("isBlockedAddress covers IPv4-mapped IPv6 in both spellings", () => {
+  // ::ffff:a9fe:a9fe is 169.254.169.254, the cloud metadata endpoint.
+  assert.equal(isBlockedAddress("::ffff:a9fe:a9fe", 6), true, "hex metadata");
+  assert.equal(isBlockedAddress("::ffff:169.254.169.254", 6), true, "dotted metadata");
+  assert.equal(isBlockedAddress("::ffff:7f00:1", 6), true, "hex loopback");
+  assert.equal(isBlockedAddress("::ffff:127.0.0.1", 6), true, "dotted loopback");
+  assert.equal(isBlockedAddress("::ffff:a00:1", 6), true, "hex 10/8");
+  assert.equal(isBlockedAddress("::ffff:c0a8:1", 6), true, "hex 192.168/16");
+
+  // A mapped PUBLIC address must still be allowed, or the fix is just a blanket ban.
+  assert.equal(isBlockedAddress("::ffff:808:808", 6), false, "hex 8.8.8.8");
+  assert.equal(isBlockedAddress("::ffff:8.8.8.8", 6), false, "dotted 8.8.8.8");
+
+  // Unmapped v6 and plain v4 keep working.
+  assert.equal(isBlockedAddress("::1", 6), true, "v6 loopback");
+  assert.equal(isBlockedAddress("fe80::1", 6), true, "v6 link-local");
+  assert.equal(isBlockedAddress("2606:4700::1111", 6), false, "public v6");
+  assert.equal(isBlockedAddress("fec0::1", 6), true, "deprecated site-local v6");
+  assert.equal(isBlockedAddress("ff02::1", 6), true, "v6 multicast");
+  assert.equal(isBlockedAddress("64:ff9b::a9fe:a9fe", 6), true, "NAT64 metadata");
+  assert.equal(isBlockedAddress("2001:1::1", 6), true, "IETF anycast aggregate");
+  assert.equal(isBlockedAddress("2001:3::1", 6), true, "IETF protocol aggregate");
+  assert.equal(isBlockedAddress("2002:7f00:1::", 6), true, "6to4 loopback");
+  assert.equal(isBlockedAddress("169.254.169.254", 4), true, "v4 metadata");
+  assert.equal(isBlockedAddress("198.18.0.1", 4), true, "benchmark network");
+  assert.equal(isBlockedAddress("192.0.0.1", 4), true, "IETF protocol network");
+  assert.equal(isBlockedAddress("8.8.8.8", 4), false, "public v4");
+});
 
 const rejects = async (url: string) => {
   try {
@@ -23,6 +65,14 @@ test("assertPublicUrl blocks everything that could reach our own network", async
   assert.ok(await rejects("http://127.1.2.3/"), "rest of 127/8");
   assert.ok(await rejects("http://[::1]/"), "ipv6 loopback");
   assert.ok(await rejects("http://[::ffff:127.0.0.1]/"), "ipv4-mapped ipv6 loopback");
+  // Both spellings, because they are not interchangeable in practice: new URL()
+  // rewrites the dotted form to the hex one, and then macOS's resolver hands back
+  // dotted while Linux hands back hex. Checking only one spelling passes locally and
+  // lets the other through in production. ::ffff:a9fe:a9fe is 169.254.169.254.
+  assert.ok(await rejects("http://[::ffff:7f00:1]/"), "hex ipv4-mapped loopback");
+  assert.ok(await rejects("http://[::ffff:a9fe:a9fe]/"), "hex ipv4-mapped metadata IP");
+  assert.ok(await rejects("http://[::ffff:169.254.169.254]/"), "dotted ipv4-mapped metadata IP");
+  assert.ok(await rejects("http://[::ffff:a00:1]/"), "hex ipv4-mapped 10/8");
 
   // RFC1918 + CGNAT + unspecified + multicast.
   assert.ok(await rejects("http://10.0.0.5/"), "10/8");

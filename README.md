@@ -24,14 +24,25 @@ Email verification is enabled only when `RESEND_API_KEY` is set. Without it, loc
 
 Root scripts (`dev`, `build`, `test`, `typecheck`, `db:migrate`) delegate to the `web` workspace. Deploying to Vercel requires the project's **Root Directory** set to `apps/web`.
 
-## Tests
+## Checks
 
 With the database running:
 
 ```sh
-bun run test                      # web
-cd apps/mobile && flutter test    # mobile
+bun run typecheck
+bun run test                      # web — needs Postgres
+bun run lint                      # biome
+bun run build
+cd apps/mobile && flutter analyze && flutter test
 ```
+
+CI runs all of these on every push and pull request (`.github/workflows/ci.yml`), against
+a Postgres service container rather than a shared database.
+
+Lint is [Biome](https://biomejs.dev), not ESLint — one binary, no plugin resolution, and
+it does not need a config-compat shim to understand Next 16. The formatter is deliberately
+switched off in `apps/web/biome.json`: turning it on would reformat every file in the repo
+in a single unreviewable diff.
 
 ## Mobile
 
@@ -58,9 +69,58 @@ functions the web app uses, and nothing there mutates.
 - Feeds use keyset (cursor) pagination instead of `OFFSET` pagination.
 - Group-scoped composite indexes keep feed and membership queries efficient.
 
+## Deploying
+
+Vercel, with Neon Postgres.
+
+- **Root Directory: `apps/web`**, with "Include files outside the Root Directory" on — the
+  bun workspace hoists dependencies to the repo root. The build fails without this.
+- `DATABASE_URL` → the Neon **pooled** (`-pooler`) host. `db/index.ts` caps the pool at one
+  connection per serverless instance, which is only correct with the pooler in front.
+- `BETTER_AUTH_SECRET` → `openssl rand -base64 32`.
+- `BETTER_AUTH_URL` → `https://<domain>`, exact, no trailing slash. A mismatch makes
+  better-auth reject browser requests with a 403.
+- `RESEND_API_KEY` and `EMAIL_FROM` → without the key, `emailEnabled` is false and **email
+  verification is silently disabled**. Set them, or launch with unverified signups on purpose.
+- **Do not set `DEV_LOGIN_EMAIL` / `DEV_LOGIN_PASSWORD`.** `lib/env.ts` fails the build if
+  either is present on a production deploy.
+
+`lib/env.ts` runs on every server entrypoint, so a missing variable fails `next build`
+rather than producing a green deploy that 500s on its first query.
+
+**Migrations run by hand**, from your machine, against the Neon **direct** (non-pooled)
+endpoint — drizzle-kit uses DDL and advisory locks that do not belong on a pooled
+connection. Not in the build command: parallel builds would race each other.
+
+```sh
+pg_dump "$DIRECT_URL" > backup-$(date +%F).sql   # before every production migration
+DATABASE_URL="$DIRECT_URL" bun run db:migrate
+```
+
+## Backups
+
+Neon point-in-time restore is the backup. Set history retention to your plan's maximum in
+the Neon console.
+
+An untested backup is not a backup, so test it once before launch:
+
+```sh
+psql "$URL" -c "insert into groups (name, slug, created_by) values ('restore drill','restore-drill','<user-id>')"
+date -u +"%Y-%m-%dT%H:%M:%SZ"                    # note this timestamp
+psql "$URL" -c "delete from groups where slug = 'restore-drill'"
+# Neon console: create a branch from a timestamp just before the delete
+psql "$BRANCH_URL" -c "select slug from groups where slug = 'restore-drill'"   # row is there
+# delete the branch
+```
+
+Deletes cascade hard — removing a group destroys its posts, comments, reactions, saves and
+reads, with no soft-delete tombstone. PITR is the only way back, which is why the drill
+matters.
+
 ## Security invariants
 
 - Never accept a `groupId` from a client payload.
+- Rate limits key on the session user id, never the IP — behind Vercel the IP is a proxy's.
 - Every group-scoped query goes through `requireMember` or `apiMember`.
 - Never distinguish "group does not exist" from "you are not a member" — both are 404.
 - Never enable `rehype-raw` for Markdown.

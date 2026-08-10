@@ -1,8 +1,9 @@
 export * from "./auth-schema";
 
-import { desc } from "drizzle-orm";
+import { desc, sql } from "drizzle-orm";
 import {
   index,
+  integer,
   pgTable,
   primaryKey,
   text,
@@ -87,6 +88,18 @@ export const posts = pgTable(
       desc(table.id),
     ),
     index("posts_tags_idx").using("gin", table.tags),
+    // Trigram index on title, so searchGroupPosts can actually use an index.
+    //
+    // Its predicate is `search_vector @@ tsquery OR title ILIKE '%q%'`. A leading-wildcard
+    // ILIKE is unindexable by btree, and one unindexable arm of an OR forces a sequential
+    // scan of the WHOLE predicate — so posts_search_idx, though perfectly good, was never
+    // reached. Measured on a 50k-post group: 122ms parallel seq scan for a term with no
+    // matches, versus 0.25ms once this exists, because the planner can finally BitmapOr
+    // the two GIN indexes together. Costs ~7MB per 150k posts. The query is unchanged.
+    index("posts_title_trgm_idx").using(
+      "gin",
+      sql`${table.title} gin_trgm_ops`,
+    ),
     // The author filter on the feed sorts by the same keys as the feed itself. Without
     // this, filtering a busy group to one infrequent poster scans most of the group.
     index("posts_group_author_feed_idx").on(
@@ -135,6 +148,22 @@ export const reactions = pgTable(
     primaryKey({ columns: [table.postId, table.userId, table.emoji] }),
   ],
 );
+
+/**
+ * Fixed-window rate limit counters.
+ *
+ * In Postgres rather than memory because serverless instances do not share memory — an
+ * in-process Map would reset on every cold start and would be per-instance, so Vercel
+ * spinning up more instances under load defeats exactly the limit you wanted. This costs
+ * one extra round-trip on paths that already talk to Postgres.
+ *
+ * `key` encodes scope and subject, e.g. "post:<userId>" or "mobile:<userId>".
+ */
+export const rateLimits = pgTable("rate_limits", {
+  key: text("key").primaryKey(),
+  count: integer("count").notNull(),
+  resetAt: timestamp("reset_at", { withTimezone: true }).notNull(),
+});
 
 /** Per-member "I have seen this group up to here", drives the unread badges. */
 export const groupReads = pgTable(

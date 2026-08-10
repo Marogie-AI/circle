@@ -46,7 +46,20 @@ class CircleApi {
     _token = token;
   }
 
-  void signOut() => _token = null;
+  Future<void> signOut() async {
+    final token = _token;
+    // Local sign-out must succeed even if the revocation request cannot reach the server.
+    _token = null;
+    if (token == null) return;
+
+    final response = await _client.post(
+      Uri.parse('$baseUrl/api/auth/sign-out'),
+      headers: {'authorization': 'Bearer $token'},
+    );
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw ApiException(response.statusCode, 'Could not revoke the session');
+    }
+  }
 
   Future<List<Group>> groups() async {
     final body = await _get(Uri.parse('$baseUrl/api/mobile/groups'));

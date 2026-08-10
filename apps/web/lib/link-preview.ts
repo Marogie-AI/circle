@@ -1,4 +1,7 @@
 import { lookup } from "node:dns/promises";
+import { request as httpRequest, type IncomingMessage } from "node:http";
+import { request as httpsRequest } from "node:https";
+import type { LookupFunction } from "node:net";
 
 /**
  * Fetching a URL the user typed, from our server, is textbook SSRF: without guards an
@@ -18,22 +21,87 @@ export type LinkPreview = {
   siteName: string | null;
 };
 
-/** IPv4/IPv6 literals that must never be requested server-side. */
-function isBlockedAddress(address: string, family: number): boolean {
+/**
+ * An IPv4-mapped IPv6 address in EITHER notation, as dotted IPv4. Otherwise null.
+ *
+ * Both spellings are required, and getting this wrong was a real hole. `new URL()`
+ * normalises `[::ffff:127.0.0.1]` to the hex form `::ffff:7f00:1` on every platform,
+ * and then the resolvers disagree: macOS hands back the dotted `::ffff:127.0.0.1`,
+ * Linux hands back the hex `::ffff:7f00:1` verbatim. A dotted-only check therefore
+ * passes on a developer's Mac and lets `http://[::ffff:a9fe:a9fe]` — 169.254.169.254,
+ * the cloud metadata endpoint — straight through in production. CI on Linux is what
+ * caught it.
+ */
+function mappedIpv4(ip: string): string | null {
+  const suffix = ip.match(/^::ffff:(.+)$/)?.[1];
+  if (!suffix) return null;
+
+  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(suffix)) {
+    const parts = suffix.split(".").map(Number);
+    return parts.every((part) => part >= 0 && part <= 255) ? suffix : null;
+  }
+
+  const groups = suffix.split(":");
+  if (groups.length !== 2) return null;
+
+  const high = Number.parseInt(groups[0], 16);
+  const low = Number.parseInt(groups[1], 16);
+  if (
+    Number.isNaN(high) ||
+    Number.isNaN(low) ||
+    high < 0 ||
+    high > 0xffff ||
+    low < 0 ||
+    low > 0xffff
+  ) {
+    return null;
+  }
+
+  return [high >> 8, high & 0xff, low >> 8, low & 0xff].join(".");
+}
+
+/**
+ * IPv4/IPv6 literals that must never be requested server-side.
+ *
+ * Exported for tests. It is deliberately pure — no DNS — because a test that goes
+ * through the resolver silently passes on macOS while the same code is exploitable on
+ * Linux. Assert on this directly and the answer is the same everywhere.
+ */
+export function isBlockedAddress(address: string, family: number): boolean {
   if (family === 6) {
     const ip = address.toLowerCase();
-    // IPv4-mapped (::ffff:169.254.169.254) would otherwise slip past the v6 checks
-    const mapped = ip.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
-    if (mapped) return isBlockedAddress(mapped[1], 4);
-    if (ip === "::1" || ip === "::") return true;
-    if (/^f[cd]/.test(ip)) return true; // fc00::/7 unique-local
-    if (/^fe[89ab]/.test(ip)) return true; // fe80::/10 link-local
+    const mapped = mappedIpv4(ip);
+    if (mapped) return isBlockedAddress(mapped, 4);
+
+    const parts = parseIpv6(ip);
+    if (!parts) return true;
+
+    // Only global-unicast space is eligible for a link preview. This rejects loopback,
+    // unspecified, NAT64, discard-only, unique/site/link-local and multicast ranges in
+    // one default-deny rule rather than trying to remember every non-public prefix.
+    if (parts[0] < 0x2000 || parts[0] > 0x3fff) return true; // outside 2000::/3
+
+    // Special-purpose ranges that sit inside 2000::/3 but are not ordinary public
+    // destinations. Block the IETF assignment aggregate as a whole: a handful of tiny
+    // anycast exceptions exist inside it, but none are useful link-preview destinations.
+    // In particular, 6to4 can encode an otherwise-blocked IPv4 address.
+    if (parts[0] === 0x2001 && parts[1] <= 0x01ff) return true; // IETF 2001::/23
+    if (parts[0] === 0x2001 && parts[1] === 0x0db8) return true; // documentation
+    if (parts[0] === 0x2002) return true; // 6to4
+    if (parts[0] === 0x3fff && parts[1] < 0x1000) return true; // documentation /20
     return false;
   }
 
+  if (family !== 4) return true;
+
   const parts = address.split(".").map(Number);
-  if (parts.length !== 4 || parts.some((n) => Number.isNaN(n))) return true;
-  const [a, b] = parts;
+  if (
+    parts.length !== 4 ||
+    parts.some((n) => !Number.isInteger(n) || n < 0 || n > 255)
+  ) {
+    return true;
+  }
+  const [a, b, c] = parts;
 
   if (a === 0) return true; // 0.0.0.0/8
   if (a === 10) return true; // private
@@ -42,16 +110,58 @@ function isBlockedAddress(address: string, family: number): boolean {
   if (a === 172 && b >= 16 && b <= 31) return true; // private
   if (a === 192 && b === 168) return true; // private
   if (a === 100 && b >= 64 && b <= 127) return true; // CGNAT
+  if (a === 192 && b === 0 && c === 0) return true; // IETF protocol assignments
+  if (a === 192 && b === 0 && c === 2) return true; // documentation
+  if (a === 192 && b === 88 && c === 99) return true; // deprecated 6to4 relay
+  if (a === 198 && (b === 18 || b === 19)) return true; // benchmark networks
+  if (a === 198 && b === 51 && c === 100) return true; // documentation
+  if (a === 203 && b === 0 && c === 113) return true; // documentation
   if (a >= 224) return true; // multicast + reserved
   return false;
 }
+
+/** Expand a canonical or compressed IPv6 address into eight 16-bit groups. */
+function parseIpv6(address: string): number[] | null {
+  if (address.includes(".")) return null; // mapped dotted notation was handled above
+  const halves = address.split("::");
+  if (halves.length > 2) return null;
+
+  const left = halves[0] ? halves[0].split(":") : [];
+  const right = halves.length === 2 && halves[1] ? halves[1].split(":") : [];
+  const parse = (group: string) => {
+    if (!/^[0-9a-f]{1,4}$/.test(group)) return null;
+    return Number.parseInt(group, 16);
+  };
+  const parsedLeft = left.map(parse);
+  const parsedRight = right.map(parse);
+  if (parsedLeft.some((part) => part === null) || parsedRight.some((part) => part === null)) {
+    return null;
+  }
+
+  const omitted = 8 - parsedLeft.length - parsedRight.length;
+  if ((halves.length === 1 && omitted !== 0) || (halves.length === 2 && omitted < 1)) {
+    return null;
+  }
+
+  return [
+    ...(parsedLeft as number[]),
+    ...Array.from({ length: omitted }, () => 0),
+    ...(parsedRight as number[]),
+  ];
+}
+
+type PublicTarget = {
+  url: URL;
+  address: string;
+  family: 4 | 6;
+};
 
 /**
  * Throws unless `raw` is an http(s) URL whose hostname resolves to a public address.
  * MUST be called for the initial URL and again for every redirect target — a public
  * host answering 302 -> http://169.254.169.254/ is the standard bypass.
  */
-export async function assertPublicUrl(raw: string): Promise<URL> {
+async function resolvePublicTarget(raw: string): Promise<PublicTarget> {
   let url: URL;
   try {
     url = new URL(raw);
@@ -66,6 +176,19 @@ export async function assertPublicUrl(raw: string): Promise<URL> {
   const hostname = url.hostname.replace(/^\[|\]$/g, "");
   if (!hostname || hostname === "localhost" || hostname.endsWith(".localhost")) {
     throw new Error("blocked host");
+  }
+
+  // Judge an IP literal directly, before asking the resolver. Otherwise the verdict
+  // depends on how the local resolver chooses to spell what you gave it — macOS rewrites
+  // ::ffff:7f00:1 to ::ffff:127.0.0.1, Linux does not — and a guard whose answer differs
+  // between a laptop and production is not a guard.
+  const literalFamily = url.hostname.startsWith("[")
+    ? 6
+    : /^\d{1,3}(\.\d{1,3}){3}$/.test(hostname)
+      ? 4
+      : null;
+  if (literalFamily && isBlockedAddress(hostname.toLowerCase(), literalFamily)) {
+    throw new Error(`blocked address: ${hostname}`);
   }
 
   // Resolve rather than trust the literal: "spoofed.example.com" can have an A record
@@ -84,7 +207,50 @@ export async function assertPublicUrl(raw: string): Promise<URL> {
     }
   }
 
-  return url;
+  const selected = resolved[0];
+  if (!selected || (selected.family !== 4 && selected.family !== 6)) {
+    throw new Error("unsupported address family");
+  }
+
+  return { url, address: selected.address, family: selected.family };
+}
+
+export async function assertPublicUrl(raw: string): Promise<URL> {
+  return (await resolvePublicTarget(raw)).url;
+}
+
+/**
+ * Connect to the exact address that passed resolvePublicTarget(). The URL remains the
+ * original hostname, so HTTP Host and HTTPS SNI/certificate validation still use it.
+ * A custom lookup closes the validate-one-answer/fetch-another DNS-rebinding window.
+ */
+function requestTarget(target: PublicTarget, signal: AbortSignal) {
+  const pinnedLookup: LookupFunction = (_hostname, options, callback) => {
+    if (options.all) {
+      callback(null, [{ address: target.address, family: target.family }]);
+      return;
+    }
+    callback(null, target.address, target.family);
+  };
+
+  const request = target.url.protocol === "https:" ? httpsRequest : httpRequest;
+  return new Promise<IncomingMessage>((resolve, reject) => {
+    const outgoing = request(
+      target.url,
+      {
+        method: "GET",
+        signal,
+        lookup: pinnedLookup,
+        headers: {
+          Accept: "text/html,application/xhtml+xml",
+          "User-Agent": "CircleBot/1.0 (+link preview)",
+        },
+      },
+      resolve,
+    );
+    outgoing.once("error", reject);
+    outgoing.end();
+  });
 }
 
 function meta(html: string, patterns: RegExp[]): string | null {
@@ -150,67 +316,59 @@ function extract(html: string, base: URL): LinkPreview {
  */
 export async function safeFetchPreview(raw: string): Promise<LinkPreview | null> {
   try {
-    let target = await assertPublicUrl(raw);
+    let target = await resolvePublicTarget(raw);
 
     for (let hop = 0; hop <= MAX_REDIRECTS; hop += 1) {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+      timer.unref?.();
 
-      let response: Response;
+      let response: IncomingMessage | undefined;
       try {
-        response = await fetch(target, {
-          method: "GET",
-          redirect: "manual", // we re-validate every hop ourselves
-          signal: controller.signal,
-          headers: {
-            Accept: "text/html,application/xhtml+xml",
-            "User-Agent": "CircleBot/1.0 (+link preview)",
-          },
-        });
+        response = await requestTarget(target, controller.signal);
+
+        const status = response.statusCode ?? 0;
+        if (status >= 300 && status < 400) {
+          const location = response.headers.location;
+          if (!location) return null;
+          // Resolve relative redirects, then re-run and re-pin the full address check.
+          target = await resolvePublicTarget(new URL(location, target.url).toString());
+          continue;
+        }
+
+        if (status < 200 || status >= 300) return null;
+
+        const type = String(response.headers["content-type"] ?? "");
+        if (!type.includes("html")) return null;
+
+        // The same deadline covers connection, headers AND body. MAX_BYTES caps memory;
+        // the timer prevents a hostile server from sending one byte every few seconds.
+        const chunks: Uint8Array[] = [];
+        let total = 0;
+        for await (const rawChunk of response) {
+          const chunk = rawChunk instanceof Uint8Array ? rawChunk : Buffer.from(rawChunk);
+          const remaining = MAX_BYTES - total;
+          if (remaining <= 0) break;
+          const kept = chunk.subarray(0, remaining);
+          chunks.push(kept);
+          total += kept.length;
+          if (total >= MAX_BYTES) break;
+        }
+
+        const merged = new Uint8Array(total);
+        let offset = 0;
+        for (const chunk of chunks) {
+          merged.set(chunk, offset);
+          offset += chunk.length;
+        }
+
+        const html = new TextDecoder("utf-8", { fatal: false }).decode(merged);
+        const preview = extract(html, target.url);
+        return preview.title || preview.description || preview.image ? preview : null;
       } finally {
         clearTimeout(timer);
+        response?.destroy();
       }
-
-      if (response.status >= 300 && response.status < 400) {
-        const location = response.headers.get("location");
-        if (!location) return null;
-        // resolve relative redirects, then re-run the full public-address check
-        target = await assertPublicUrl(new URL(location, target).toString());
-        continue;
-      }
-
-      if (!response.ok) return null;
-
-      const type = response.headers.get("content-type") ?? "";
-      if (!type.includes("html")) return null;
-
-      const body = response.body;
-      if (!body) return null;
-
-      // read at most MAX_BYTES: meta tags live in <head>, and an endless response
-      // must not be able to exhaust memory
-      const reader = body.getReader();
-      const chunks: Uint8Array[] = [];
-      let total = 0;
-      while (total < MAX_BYTES) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        chunks.push(value);
-        total += value.length;
-      }
-      await reader.cancel().catch(() => {});
-
-      const merged = new Uint8Array(total);
-      let offset = 0;
-      for (const chunk of chunks) {
-        merged.set(chunk.subarray(0, Math.min(chunk.length, total - offset)), offset);
-        offset += chunk.length;
-        if (offset >= total) break;
-      }
-
-      const html = new TextDecoder("utf-8", { fatal: false }).decode(merged);
-      const preview = extract(html, target);
-      return preview.title || preview.description || preview.image ? preview : null;
     }
 
     return null; // too many redirects

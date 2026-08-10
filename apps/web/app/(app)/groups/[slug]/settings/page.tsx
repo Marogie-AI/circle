@@ -24,7 +24,7 @@ function requestOrigin(host: string, forwardedProto: string | null) {
 
 export default async function SettingsPage({ params }: SettingsPageProps) {
   const { slug } = await params;
-  const { group, user, role } = await requireMember(slug);
+  const { group, role } = await requireMember(slug);
   const requestHeaders = await headers();
   const host = requestHeaders.get("host") ?? "localhost";
   const origin = requestOrigin(host, requestHeaders.get("x-forwarded-proto"));
@@ -44,7 +44,8 @@ export default async function SettingsPage({ params }: SettingsPageProps) {
           gt(invites.expiresAt, now),
         ),
       )
-      .orderBy(desc(invites.createdAt)),
+      .orderBy(desc(invites.createdAt))
+      .limit(20),
     db
       .select({
         userId: memberships.userId,

@@ -1,17 +1,32 @@
 "use server";
 
 import { randomBytes } from "node:crypto";
-import { and, eq } from "drizzle-orm";
+import { and, count, eq, isNotNull, lte, or } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { notFound, redirect } from "next/navigation";
 import { after } from "next/server";
 import { db } from "@/db";
-import { comments, invites, posts, reactions } from "@/db/schema";
+import { comments, groups, invites, posts, reactions } from "@/db/schema";
 import { requireMember } from "@/lib/guard";
 import { safeFetchPreview } from "@/lib/link-preview";
 import { isUuid, REACTION_EMOJIS } from "@/lib/post";
+import { allow } from "@/lib/rate-limit";
 
 export type PostActionState = { error: string | null };
+
+/**
+ * Limits on the two actions that create durable content. Set well above what a person
+ * types by hand — the point is to blunt a script, not to nag a fast writer.
+ *
+ * toggleReaction and the save/unsave toggles are deliberately not limited: they are
+ * idempotent against a composite primary key and a fixed emoji allowlist, so hammering
+ * them cannot create unbounded rows.
+ */
+const POST_LIMIT = { max: 20, windowSeconds: 60 };
+const COMMENT_LIMIT = { max: 30, windowSeconds: 60 };
+const PREVIEW_LIMIT = { max: 10, windowSeconds: 60 };
+const INVITE_CREATE_LIMIT = { max: 10, windowSeconds: 60 * 60 };
+const MAX_ACTIVE_INVITES = 20;
 
 function normalizeTags(value: string) {
   return Array.from(
@@ -123,11 +138,49 @@ export async function createInvite(slug: string) {
   const { group, user } = await requireMember(slug);
   const now = new Date();
 
-  await db.insert(invites).values({
-    token: randomBytes(24).toString("base64url"),
-    groupId: group.id,
-    createdBy: user.id,
-    expiresAt: new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000),
+  if (
+    !(await allow(
+      `invite-create:${user.id}`,
+      INVITE_CREATE_LIMIT.max,
+      INVITE_CREATE_LIMIT.windowSeconds,
+    ))
+  ) {
+    throw new Error("You have created several invites recently. Try again later.");
+  }
+
+  await db.transaction(async (tx) => {
+    // Lock the group so simultaneous requests cannot race the active-invite ceiling.
+    await tx
+      .select({ id: groups.id })
+      .from(groups)
+      .where(eq(groups.id, group.id))
+      .for("update");
+
+    // Expired and revoked tokens no longer carry product value. Removing them here
+    // keeps the durable invite table bounded rather than merely hiding old rows.
+    await tx.delete(invites).where(
+      and(
+        eq(invites.groupId, group.id),
+        or(isNotNull(invites.revokedAt), lte(invites.expiresAt, now)),
+      ),
+    );
+
+    const [{ total }] = await tx
+      .select({ total: count() })
+      .from(invites)
+      .where(eq(invites.groupId, group.id));
+    if (total >= MAX_ACTIVE_INVITES) {
+      throw new Error(
+        `This group already has ${MAX_ACTIVE_INVITES} active invites. Revoke one first.`,
+      );
+    }
+
+    await tx.insert(invites).values({
+      token: randomBytes(24).toString("base64url"),
+      groupId: group.id,
+      createdBy: user.id,
+      expiresAt: new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000),
+    });
   });
 
   revalidatePath(`/groups/${slug}/settings`);
@@ -152,6 +205,10 @@ export async function createPost(
   const fields = readPostFields(formData);
   if (!fields.ok) return { error: fields.error };
 
+  if (!(await allow(`post:${user.id}`, POST_LIMIT.max, POST_LIMIT.windowSeconds))) {
+    return { error: "You are posting very fast. Wait a moment and try again." };
+  }
+
   const [newPost] = await db
     .insert(posts)
     .values({
@@ -164,7 +221,16 @@ export async function createPost(
     })
     .returning({ id: posts.id });
 
-  attachPreview(newPost.id, fields.url);
+  if (
+    fields.url &&
+    (await allow(
+      `preview:${user.id}`,
+      PREVIEW_LIMIT.max,
+      PREVIEW_LIMIT.windowSeconds,
+    ))
+  ) {
+    attachPreview(newPost.id, fields.url);
+  }
 
   redirect(`/groups/${slug}/p/${newPost.id}`);
 }
@@ -186,6 +252,13 @@ export async function updatePost(
       body: fields.body,
       url: fields.url,
       tags: fields.tags,
+      // Never show metadata from the old URL while a new preview is pending or
+      // deliberately skipped by the outbound-fetch limiter.
+      ogTitle: null,
+      ogDescription: null,
+      ogImage: null,
+      ogSite: null,
+      ogFetchedAt: null,
       updatedAt: new Date(),
     })
     .where(
@@ -200,7 +273,16 @@ export async function updatePost(
   // no row matched => not this group's post, or not yours to edit. Same 404 either way.
   if (!updated) notFound();
 
-  attachPreview(updated.id, fields.url);
+  if (
+    fields.url &&
+    (await allow(
+      `preview:${user.id}`,
+      PREVIEW_LIMIT.max,
+      PREVIEW_LIMIT.windowSeconds,
+    ))
+  ) {
+    attachPreview(updated.id, fields.url);
+  }
   revalidatePath(`/groups/${slug}/p/${postId}`);
   redirect(`/groups/${slug}/p/${postId}`);
 }
@@ -293,6 +375,11 @@ export async function addComment(
 
   if (body.length < 1 || body.length > 5_000) {
     throw new Error("Comment must be between 1 and 5,000 characters.");
+  }
+  if (
+    !(await allow(`comment:${user.id}`, COMMENT_LIMIT.max, COMMENT_LIMIT.windowSeconds))
+  ) {
+    throw new Error("You are commenting very fast. Wait a moment and try again.");
   }
   if (!(await postInGroup(postId, group.id))) notFound();
 

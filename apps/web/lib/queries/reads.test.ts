@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { test } from "bun:test";
-import { eq, inArray } from "drizzle-orm";
+import { inArray } from "drizzle-orm";
 import { db } from "@/db";
 import { groupReads, groups, memberships, posts, user } from "@/db/schema";
 import { markGroupSeen, unreadCounts } from "@/lib/queries/reads";

@@ -1,12 +1,16 @@
 "use server";
 
 import { randomUUID } from "node:crypto";
-import { groups, memberships } from "@/db/schema";
+import { count, eq } from "drizzle-orm";
+import { groups, memberships, user } from "@/db/schema";
 import { db } from "@/db";
 import { requireSession } from "@/lib/guard";
+import { allow } from "@/lib/rate-limit";
 import { redirect } from "next/navigation";
 
 const MAX_CREATE_ATTEMPTS = 4;
+const MAX_OWNED_GROUPS = 50;
+const GROUP_CREATE_LIMIT = { max: 5, windowSeconds: 60 * 60 };
 
 function makeSlug(name: string) {
   return (
@@ -44,6 +48,15 @@ export async function createGroup(formData: FormData) {
   if (name.length < 1 || name.length > 60) {
     throw new Error("Group name must be between 1 and 60 characters.");
   }
+  if (
+    !(await allow(
+      `group-create:${session.user.id}`,
+      GROUP_CREATE_LIMIT.max,
+      GROUP_CREATE_LIMIT.windowSeconds,
+    ))
+  ) {
+    throw new Error("You have created several groups recently. Try again later.");
+  }
 
   const baseSlug = makeSlug(name);
   let createdSlug: string | undefined;
@@ -56,6 +69,22 @@ export async function createGroup(formData: FormData) {
 
     try {
       await db.transaction(async (tx) => {
+        // Serialize the quota check for this owner. Without the row lock, concurrent
+        // requests could all observe 49 groups and each insert a 50th.
+        await tx
+          .select({ id: user.id })
+          .from(user)
+          .where(eq(user.id, session.user.id))
+          .for("update");
+
+        const [{ total }] = await tx
+          .select({ total: count() })
+          .from(groups)
+          .where(eq(groups.createdBy, session.user.id));
+        if (total >= MAX_OWNED_GROUPS) {
+          throw new Error(`Each account can own at most ${MAX_OWNED_GROUPS} groups.`);
+        }
+
         const [group] = await tx
           .insert(groups)
           .values({ name, slug, createdBy: session.user.id })

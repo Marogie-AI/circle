@@ -1,10 +1,13 @@
 import { relations } from "drizzle-orm";
 import {
+  bigint,
   boolean,
   index,
+  integer,
   pgTable,
   text,
   timestamp,
+  uniqueIndex,
 } from "drizzle-orm/pg-core";
 
 export const user = pgTable("user", {
@@ -79,6 +82,18 @@ export const verification = pgTable(
       .notNull(),
   },
   (table) => [index("verification_identifier_idx").on(table.identifier)],
+);
+
+/** Durable Better Auth throttles. Required on serverless: memory is per-instance. */
+export const rateLimit = pgTable(
+  "auth_rate_limits",
+  {
+    id: text("id").primaryKey(),
+    key: text("key").notNull(),
+    count: integer("count").notNull(),
+    lastRequest: bigint("last_request", { mode: "number" }).notNull(),
+  },
+  (table) => [uniqueIndex("auth_rate_limits_key_idx").on(table.key)],
 );
 
 export const userRelations = relations(user, ({ many }) => ({

@@ -51,6 +51,38 @@ void main() {
     expect(seen.queryParameters.containsKey('cursor'), isFalse);
   });
 
+  test('sign-out revokes the server session and always clears the local token', () async {
+    late http.Request signOutRequest;
+    final api = CircleApi('http://x', client: MockClient((request) async {
+      if (request.url.path.endsWith('/sign-in/email')) {
+        return http.Response('{"token":"T","user":{"id":"u"}}', 200);
+      }
+      signOutRequest = request;
+      return http.Response('{}', 204);
+    }));
+
+    await api.signIn('a@b.c', 'password');
+    await api.signOut();
+
+    expect(api.isSignedIn, isFalse);
+    expect(signOutRequest.url.path, '/api/auth/sign-out');
+    expect(signOutRequest.headers['authorization'], 'Bearer T');
+  });
+
+  test('failed remote sign-out still clears the local token', () async {
+    final api = CircleApi('http://x', client: MockClient((request) async {
+      if (request.url.path.endsWith('/sign-in/email')) {
+        return http.Response('{"token":"T","user":{"id":"u"}}', 200);
+      }
+      return http.Response('{}', 500);
+    }));
+
+    await api.signIn('a@b.c', 'password');
+
+    await expectLater(api.signOut(), throwsA(isA<ApiException>()));
+    expect(api.isSignedIn, isFalse);
+  });
+
   test('groups parses the list', () async {
     final api = CircleApi('http://x', client: MockClient((_) async {
       return http.Response(
