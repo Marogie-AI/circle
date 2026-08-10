@@ -29,6 +29,60 @@ if (missing.length > 0) {
   );
 }
 
+function parseOrigin(value: string, key: string) {
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new Error(`${key} must be a valid absolute URL.`);
+  }
+
+  if (
+    (url.protocol !== "http:" && url.protocol !== "https:") ||
+    url.username ||
+    url.password ||
+    url.pathname !== "/" ||
+    url.search ||
+    url.hash
+  ) {
+    throw new Error(`${key} must be an http(s) origin with no path, credentials, query, or hash.`);
+  }
+
+  return url;
+}
+
+export function validateProductionAuthConfig(secret: string, authUrl: string) {
+  const normalizedSecret = secret.toLowerCase();
+  if (
+    secret.length < 32 ||
+    new Set(secret).size < 12 ||
+    /(change.?me|example|not.?real|password|replace|secret)/.test(normalizedSecret)
+  ) {
+    throw new Error(
+      "BETTER_AUTH_SECRET must be a randomly generated value of at least 32 characters.",
+    );
+  }
+
+  const authOrigin = parseOrigin(
+    authUrl,
+    "BETTER_AUTH_URL",
+  );
+  const isLoopback =
+    authOrigin.hostname === "localhost" ||
+    authOrigin.hostname === "127.0.0.1" ||
+    authOrigin.hostname === "[::1]";
+  if (authOrigin.protocol !== "https:" && !isLoopback) {
+    throw new Error("BETTER_AUTH_URL must use https:// on a production deployment.");
+  }
+}
+
+if (isProduction) {
+  validateProductionAuthConfig(
+    process.env.BETTER_AUTH_SECRET as string,
+    process.env.BETTER_AUTH_URL as string,
+  );
+}
+
 // app/dev-login/route.ts is already double-gated (NODE_ENV plus both variables being
 // set). This makes the second gate loud: a production deploy carrying these values fails
 // to build rather than quietly shipping a login bypass.

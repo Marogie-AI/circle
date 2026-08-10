@@ -44,7 +44,8 @@ export default async function SettingsPage({ params }: SettingsPageProps) {
           gt(invites.expiresAt, now),
         ),
       )
-      .orderBy(desc(invites.createdAt)),
+      .orderBy(desc(invites.createdAt))
+      .limit(20),
     db
       .select({
         userId: memberships.userId,

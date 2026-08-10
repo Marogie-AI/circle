@@ -32,7 +32,15 @@ test("isBlockedAddress covers IPv4-mapped IPv6 in both spellings", () => {
   assert.equal(isBlockedAddress("::1", 6), true, "v6 loopback");
   assert.equal(isBlockedAddress("fe80::1", 6), true, "v6 link-local");
   assert.equal(isBlockedAddress("2606:4700::1111", 6), false, "public v6");
+  assert.equal(isBlockedAddress("fec0::1", 6), true, "deprecated site-local v6");
+  assert.equal(isBlockedAddress("ff02::1", 6), true, "v6 multicast");
+  assert.equal(isBlockedAddress("64:ff9b::a9fe:a9fe", 6), true, "NAT64 metadata");
+  assert.equal(isBlockedAddress("2001:1::1", 6), true, "IETF anycast aggregate");
+  assert.equal(isBlockedAddress("2001:3::1", 6), true, "IETF protocol aggregate");
+  assert.equal(isBlockedAddress("2002:7f00:1::", 6), true, "6to4 loopback");
   assert.equal(isBlockedAddress("169.254.169.254", 4), true, "v4 metadata");
+  assert.equal(isBlockedAddress("198.18.0.1", 4), true, "benchmark network");
+  assert.equal(isBlockedAddress("192.0.0.1", 4), true, "IETF protocol network");
   assert.equal(isBlockedAddress("8.8.8.8", 4), false, "public v4");
 });
 

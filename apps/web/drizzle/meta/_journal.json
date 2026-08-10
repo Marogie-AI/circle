@@ -43,6 +43,13 @@
       "when": 1786319843367,
       "tag": "0005_productive_wolfpack",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1786321770707,
+      "tag": "0006_dashing_mojo",
+      "breakpoints": true
     }
   ]
 }

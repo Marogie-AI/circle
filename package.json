@@ -5,6 +5,9 @@
   "workspaces": [
     "apps/web"
   ],
+  "overrides": {
+    "esbuild": "0.28.2"
+  },
   "scripts": {
     "dev": "bun --filter web dev",
     "build": "bun --filter web build",

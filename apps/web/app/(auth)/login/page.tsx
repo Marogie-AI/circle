@@ -5,15 +5,12 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useState } from "react";
 import type { FormEvent } from "react";
 import { signIn } from "@/lib/auth-client";
-
-function getDestination(next: string | null) {
-  return next?.startsWith("/") && !next.startsWith("//") ? next : "/";
-}
+import { safeRedirectTarget } from "@/lib/safe-redirect";
 
 function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const next = getDestination(searchParams.get("next"));
+  const next = safeRedirectTarget(searchParams.get("next"));
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
 

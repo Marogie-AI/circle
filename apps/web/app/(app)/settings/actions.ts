@@ -43,8 +43,9 @@ export async function changePassword(
       body: {
         currentPassword,
         newPassword,
-        // keep other devices signed in; this is a friends app, not a bank
-        revokeOtherSessions: false,
+        // A password change is also the account-recovery path. Any session an attacker
+        // established with the old password must stop working immediately.
+        revokeOtherSessions: true,
       },
       headers: await headers(),
     });

@@ -22,6 +22,9 @@ export const auth = betterAuth({
   },
   rateLimit: {
     enabled: true,
+    // Vercel instances do not share memory and cold starts erase it. The database
+    // backend makes the login/signup limits durable and atomic across instances.
+    storage: "database",
     window: 10,
     max: 100,
     customRules: {
