@@ -6,10 +6,21 @@ import { revalidatePath } from "next/cache";
 import { notFound, redirect } from "next/navigation";
 import { after } from "next/server";
 import { db } from "@/db";
-import { comments, groups, invites, posts, reactions } from "@/db/schema";
+import {
+  commentReactions,
+  comments,
+  groups,
+  invites,
+  memberships,
+  posts,
+  reactions,
+} from "@/db/schema";
 import { requireMember } from "@/lib/guard";
 import { safeFetchPreview } from "@/lib/link-preview";
+import { extractMentionIds } from "@/lib/mentions";
+import { notify } from "@/lib/notify";
 import { isUuid, REACTION_EMOJIS } from "@/lib/post";
+import { listGroupMembers } from "@/lib/queries/groups";
 import { allow } from "@/lib/rate-limit";
 
 export type PostActionState = { error: string | null };
@@ -46,13 +57,113 @@ function normalizeTags(value: string) {
   ).slice(0, 5);
 }
 
-async function postInGroup(postId: string, groupId: string) {
+export async function updateGroupDetails(slug: string, formData: FormData) {
+  const { group, role } = await requireMember(slug);
+  if (role !== "owner") {
+    throw new Error("Only the owner can edit group details.");
+  }
+
+  const description =
+    String(formData.get("description") ?? "").trim().slice(0, 280) || null;
+
+  const coverRaw = String(formData.get("coverUrl") ?? "").trim();
+  let coverUrl: string | null = null;
+  if (coverRaw) {
+    let parsed: URL;
+    try {
+      parsed = new URL(coverRaw);
+    } catch {
+      throw new Error("Cover image URL must be a valid URL.");
+    }
+    // img-src in the CSP only allows https:, so an http cover would silently break.
+    if (parsed.protocol !== "https:") {
+      throw new Error("Cover image URL must start with https://");
+    }
+    coverUrl = parsed.toString();
+  }
+
+  await db
+    .update(groups)
+    .set({ description, coverUrl })
+    .where(eq(groups.id, group.id));
+
+  revalidatePath(`/groups/${slug}`);
+  revalidatePath(`/groups/${slug}/settings`);
+}
+
+export async function pinPost(slug: string, postId: string) {
+  const { group, role } = await requireMember(slug);
+  if (role !== "owner") throw new Error("Only the owner can pin posts.");
+  if (!(await publishedPostInGroup(postId, group.id))) notFound();
+  await db.update(posts).set({ pinnedAt: new Date() }).where(eq(posts.id, postId));
+  revalidatePath(`/groups/${slug}`);
+  revalidatePath(`/groups/${slug}/p/${postId}`);
+}
+
+export async function unpinPost(slug: string, postId: string) {
+  const { group, role } = await requireMember(slug);
+  if (role !== "owner") throw new Error("Only the owner can unpin posts.");
+  if (!(await publishedPostInGroup(postId, group.id))) notFound();
+  await db.update(posts).set({ pinnedAt: null }).where(eq(posts.id, postId));
+  revalidatePath(`/groups/${slug}`);
+  revalidatePath(`/groups/${slug}/p/${postId}`);
+}
+
+/** Turn a draft into a live post. Author only. Fans out new_post notifications now. */
+export async function publishDraft(slug: string, postId: string) {
+  const { group, user } = await requireMember(slug);
+
+  const [post] = await db
+    .select({ authorId: posts.authorId, status: posts.status })
+    .from(posts)
+    .where(and(eq(posts.id, postId), eq(posts.groupId, group.id)))
+    .limit(1);
+  if (!post) notFound();
+  if (post.authorId !== user.id) throw new Error("Only the author can publish this draft.");
+  if (post.status !== "draft") {
+    // Already live — nothing to do, just go to it.
+    redirect(`/groups/${slug}/p/${postId}`);
+  }
+
+  await db
+    .update(posts)
+    .set({ status: "published", createdAt: new Date() })
+    .where(eq(posts.id, postId));
+
+  after(async () => {
+    const groupMembers = await db
+      .select({ userId: memberships.userId })
+      .from(memberships)
+      .where(eq(memberships.groupId, group.id));
+    await notify(
+      groupMembers.map((member) => ({
+        userId: member.userId,
+        actorId: user.id,
+        type: "new_post" as const,
+        groupId: group.id,
+        postId,
+      })),
+    );
+  });
+
+  revalidatePath(`/groups/${slug}`);
+  redirect(`/groups/${slug}/p/${postId}`);
+}
+
+/** A group member may interact only with posts that are visible to the group. */
+async function publishedPostInGroup(postId: string, groupId: string) {
   if (!isUuid(postId)) return false;
 
   const [post] = await db
     .select({ id: posts.id })
     .from(posts)
-    .where(and(eq(posts.id, postId), eq(posts.groupId, groupId)))
+    .where(
+      and(
+        eq(posts.id, postId),
+        eq(posts.groupId, groupId),
+        eq(posts.status, "published"),
+      ),
+    )
     .limit(1);
 
   return Boolean(post);
@@ -101,6 +212,38 @@ function readPostFields(formData: FormData): PostFields {
 }
 
 /**
+ * Lenient version of readPostFields for drafts: an empty title or body is fine (a draft
+ * is unfinished by definition), only the max lengths and the URL shape are enforced.
+ */
+function readDraftFields(formData: FormData): PostFields {
+  const title = String(formData.get("title") ?? "").trim().slice(0, 200);
+  const body = String(formData.get("body") ?? "").trim().slice(0, 10_000);
+  const rawUrl = String(formData.get("url") ?? "").trim();
+
+  let url: string | null = null;
+  if (rawUrl) {
+    try {
+      const parsed = new URL(rawUrl);
+      if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+        return { ok: false, error: "Link must use http:// or https://." };
+      }
+      url = parsed.toString();
+    } catch {
+      return { ok: false, error: "Enter a valid link, including http:// or https://." };
+    }
+  }
+
+  return {
+    ok: true,
+    // NOT NULL column: an untitled draft still needs a placeholder to list under.
+    title: title || "Untitled draft",
+    body,
+    url,
+    tags: normalizeTags(String(formData.get("tags") ?? "")),
+  };
+}
+
+/**
  * Attach Open Graph data after the response is sent.
  *
  * `after()` rather than `await`: the fetch has a 5s timeout, and awaiting it would make
@@ -126,16 +269,19 @@ function attachPreview(postId: string, url: string | null) {
 }
 
 /**
- * Post mutations are allowed for the author, or for the group owner (moderation).
- * Returned as an extra predicate so it lands INSIDE the mutation's own WHERE clause —
- * a select-then-mutate would leave a window where membership changes in between.
+ * Post mutations are allowed for the author, or for the group owner when the post is
+ * published. Drafts remain author-private even from owners. Returned as an extra
+ * predicate so it lands INSIDE the mutation's own WHERE clause.
  */
-function authorOrOwner(role: string, userId: string) {
-  return role === "owner" ? undefined : eq(posts.authorId, userId);
+function authorOrOwnerOfPublishedPost(role: string, userId: string) {
+  return role === "owner"
+    ? or(eq(posts.authorId, userId), eq(posts.status, "published"))
+    : eq(posts.authorId, userId);
 }
 
 export async function createInvite(slug: string) {
-  const { group, user } = await requireMember(slug);
+  const { group, user, role } = await requireMember(slug);
+  if (role !== "owner") throw new Error("Only the owner can invite people.");
   const now = new Date();
 
   if (
@@ -187,7 +333,8 @@ export async function createInvite(slug: string) {
 }
 
 export async function revokeInvite(slug: string, token: string) {
-  const { group } = await requireMember(slug);
+  const { group, role } = await requireMember(slug);
+  if (role !== "owner") throw new Error("Only the owner can revoke invites.");
 
   await db
     .update(invites)
@@ -202,7 +349,11 @@ export async function createPost(
   formData: FormData,
 ): Promise<PostActionState> {
   const { group, user } = await requireMember(slug);
-  const fields = readPostFields(formData);
+  const isDraft = String(formData.get("intent") ?? "") === "draft";
+
+  // A draft is a half-thought — it must save even with an empty title or body. Only a
+  // publish goes through the strict field validation.
+  const fields = isDraft ? readDraftFields(formData) : readPostFields(formData);
   if (!fields.ok) return { error: fields.error };
 
   if (!(await allow(`post:${user.id}`, POST_LIMIT.max, POST_LIMIT.windowSeconds))) {
@@ -218,6 +369,7 @@ export async function createPost(
       body: fields.body,
       url: fields.url,
       tags: fields.tags,
+      status: isDraft ? "draft" : "published",
     })
     .returning({ id: posts.id });
 
@@ -232,6 +384,39 @@ export async function createPost(
     attachPreview(newPost.id, fields.url);
   }
 
+  // A draft is private to its author: no feed, no notifications. Send them to the
+  // drafts list to keep working.
+  if (isDraft) {
+    revalidatePath(`/groups/${slug}/drafts`);
+    redirect(`/groups/${slug}/drafts`);
+  }
+
+  // Notify every other member that a new post landed. One row per member — fine at the
+  // 50-member group ceiling. # ponytail: per-member fan-out, batch/digest if groups grow.
+  after(async () => {
+    const members = await listGroupMembers(group.id);
+    // Everyone gets the new-post ping; anyone named in the body also gets a mention.
+    await notify(
+      members.map((member) => ({
+        userId: member.id,
+        actorId: user.id,
+        type: "new_post" as const,
+        groupId: group.id,
+        postId: newPost.id,
+      })),
+    );
+    await notify(
+      extractMentionIds(fields.body, members).map((id) => ({
+        userId: id,
+        actorId: user.id,
+        type: "mention" as const,
+        groupId: group.id,
+        postId: newPost.id,
+      })),
+    );
+  });
+
+  revalidatePath(`/groups/${slug}`);
   redirect(`/groups/${slug}/p/${newPost.id}`);
 }
 
@@ -241,9 +426,27 @@ export async function updatePost(
   formData: FormData,
 ): Promise<PostActionState> {
   const { group, user, role } = await requireMember(slug);
-  const fields = readPostFields(formData);
-  if (!fields.ok) return { error: fields.error };
   if (!isUuid(postId)) notFound();
+
+  // A draft may remain incomplete while its author works on it. Reading the status here
+  // chooses the validator; matching it again in the UPDATE below prevents a concurrent
+  // publish from letting lenient draft validation overwrite a live post.
+  const [current] = await db
+    .select({ status: posts.status })
+    .from(posts)
+    .where(
+      and(
+        eq(posts.id, postId),
+        eq(posts.groupId, group.id),
+        authorOrOwnerOfPublishedPost(role, user.id),
+      ),
+    )
+    .limit(1);
+  if (!current) notFound();
+
+  const fields =
+    current.status === "draft" ? readDraftFields(formData) : readPostFields(formData);
+  if (!fields.ok) return { error: fields.error };
 
   const [updated] = await db
     .update(posts)
@@ -265,7 +468,8 @@ export async function updatePost(
       and(
         eq(posts.id, postId),
         eq(posts.groupId, group.id), // never a client-supplied group
-        authorOrOwner(role, user.id),
+        eq(posts.status, current.status),
+        authorOrOwnerOfPublishedPost(role, user.id),
       ),
     )
     .returning({ id: posts.id, url: posts.url });
@@ -297,7 +501,7 @@ export async function deletePost(slug: string, postId: string) {
       and(
         eq(posts.id, postId),
         eq(posts.groupId, group.id),
-        authorOrOwner(role, user.id),
+        authorOrOwnerOfPublishedPost(role, user.id),
       ),
     )
     .returning({ id: posts.id });
@@ -323,7 +527,7 @@ export async function updateComment(
   }
   if (!isUuid(commentId)) notFound();
   // scope the comment to a post that is genuinely in this group
-  if (!(await postInGroup(postId, group.id))) notFound();
+  if (!(await publishedPostInGroup(postId, group.id))) notFound();
 
   const [updated] = await db
     .update(comments)
@@ -348,7 +552,7 @@ export async function deleteComment(
 ) {
   const { group, user, role } = await requireMember(slug);
   if (!isUuid(commentId)) notFound();
-  if (!(await postInGroup(postId, group.id))) notFound();
+  if (!(await publishedPostInGroup(postId, group.id))) notFound();
 
   const [deleted] = await db
     .delete(comments)
@@ -381,10 +585,53 @@ export async function addComment(
   ) {
     throw new Error("You are commenting very fast. Wait a moment and try again.");
   }
-  if (!(await postInGroup(postId, group.id))) notFound();
 
-  await db.insert(comments).values({ postId, authorId: user.id, body });
+  // Fetch a published post (scoped to this group) to get its author for the
+  // notification. Drafts are private to their author and cannot be commented on.
+  const [post] = await db
+    .select({ authorId: posts.authorId })
+    .from(posts)
+    .where(
+      and(
+        eq(posts.id, postId),
+        eq(posts.groupId, group.id),
+        eq(posts.status, "published"),
+      ),
+    )
+    .limit(1);
+  if (!post) notFound();
+
+  const [comment] = await db
+    .insert(comments)
+    .values({ postId, authorId: user.id, body })
+    .returning({ id: comments.id });
   revalidatePath(`/groups/${slug}/p/${postId}`);
+
+  // Notifications are best-effort, off the critical path: a database failure after the
+  // comment was committed must not make the user retry and create duplicate content.
+  after(async () => {
+    await notify([
+      {
+        userId: post.authorId,
+        actorId: user.id,
+        type: "comment",
+        groupId: group.id,
+        postId,
+        commentId: comment.id,
+      },
+    ]);
+    const members = await listGroupMembers(group.id);
+    await notify(
+      extractMentionIds(body, members).map((id) => ({
+        userId: id,
+        actorId: user.id,
+        type: "mention" as const,
+        groupId: group.id,
+        postId,
+        commentId: comment.id,
+      })),
+    );
+  });
 }
 
 export async function toggleReaction(
@@ -397,7 +644,19 @@ export async function toggleReaction(
   if (!(REACTION_EMOJIS as readonly string[]).includes(emoji)) {
     throw new Error("Unsupported reaction.");
   }
-  if (!(await postInGroup(postId, group.id))) notFound();
+
+  const [post] = await db
+    .select({ authorId: posts.authorId })
+    .from(posts)
+    .where(
+      and(
+        eq(posts.id, postId),
+        eq(posts.groupId, group.id),
+        eq(posts.status, "published"),
+      ),
+    )
+    .limit(1);
+  if (!post) notFound();
 
   const existing = await db
     .select({ emoji: reactions.emoji })
@@ -425,6 +684,71 @@ export async function toggleReaction(
     await db
       .insert(reactions)
       .values({ postId, userId: user.id, emoji })
+      .onConflictDoNothing();
+    // Only on add, never on remove — a toggle spammer shouldn't spam notifications.
+    after(async () => {
+      await notify([
+        {
+          userId: post.authorId,
+          actorId: user.id,
+          type: "reaction",
+          groupId: group.id,
+          postId,
+        },
+      ]);
+    });
+  }
+
+  revalidatePath(`/groups/${slug}/p/${postId}`);
+}
+
+export async function toggleCommentReaction(
+  slug: string,
+  postId: string,
+  commentId: string,
+  emoji: string,
+) {
+  const { group, user } = await requireMember(slug);
+
+  if (!(REACTION_EMOJIS as readonly string[]).includes(emoji)) {
+    throw new Error("Unsupported reaction.");
+  }
+  if (!isUuid(commentId) || !(await publishedPostInGroup(postId, group.id))) notFound();
+
+  // The comment must belong to this post (which we just confirmed is in this group).
+  const [comment] = await db
+    .select({ authorId: comments.authorId })
+    .from(comments)
+    .where(and(eq(comments.id, commentId), eq(comments.postId, postId)))
+    .limit(1);
+  if (!comment) notFound();
+
+  const existing = await db
+    .select({ emoji: commentReactions.emoji })
+    .from(commentReactions)
+    .where(
+      and(
+        eq(commentReactions.commentId, commentId),
+        eq(commentReactions.userId, user.id),
+        eq(commentReactions.emoji, emoji),
+      ),
+    )
+    .limit(1);
+
+  if (existing.length) {
+    await db
+      .delete(commentReactions)
+      .where(
+        and(
+          eq(commentReactions.commentId, commentId),
+          eq(commentReactions.userId, user.id),
+          eq(commentReactions.emoji, emoji),
+        ),
+      );
+  } else {
+    await db
+      .insert(commentReactions)
+      .values({ commentId, userId: user.id, emoji })
       .onConflictDoNothing();
   }
 

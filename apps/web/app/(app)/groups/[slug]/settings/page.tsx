@@ -1,7 +1,15 @@
 import Link from "next/link";
-import { and, asc, desc, eq, gt, isNull } from "drizzle-orm";
-import { headers } from "next/headers";
-import { createInvite, revokeInvite } from "@/app/(app)/groups/[slug]/actions";
+import { and, asc, desc, eq, gt, isNull, sql } from "drizzle-orm";
+import {
+  createInvite,
+  revokeInvite,
+  updateGroupDetails,
+} from "@/app/(app)/groups/[slug]/actions";
+import {
+  deleteGroup,
+  removeMember,
+  setMemberRole,
+} from "@/app/(app)/groups/[slug]/member-actions";
 import { CopyButton } from "@/components/copy-button";
 import { SubmitButton } from "@/components/submit-button";
 import { db } from "@/db";
@@ -12,45 +20,44 @@ type SettingsPageProps = {
   params: Promise<{ slug: string }>;
 };
 
-function requestOrigin(host: string, forwardedProto: string | null) {
-  const proto =
-    forwardedProto?.split(",")[0]?.trim() ||
-    (host.startsWith("localhost") || host.startsWith("127.0.0.1")
-      ? "http"
-      : "https");
-
-  return `${proto}://${host}`;
+function applicationOrigin() {
+  // Production validates this setting at build time. Never derive an invite URL from
+  // Host/X-Forwarded-Proto: an untrusted proxy header could turn a copied invite into a
+  // link to an attacker's origin.
+  const configured = process.env.BETTER_AUTH_URL;
+  return configured ? new URL(configured).origin : "http://localhost:3002";
 }
 
 export default async function SettingsPage({ params }: SettingsPageProps) {
   const { slug } = await params;
-  const { group, role } = await requireMember(slug);
-  const requestHeaders = await headers();
-  const host = requestHeaders.get("host") ?? "localhost";
-  const origin = requestOrigin(host, requestHeaders.get("x-forwarded-proto"));
+  const { group, role, user: viewer } = await requireMember(slug);
+  const origin = applicationOrigin();
   const now = new Date();
 
   const [activeInvites, members] = await Promise.all([
-    db
-      .select({
-        token: invites.token,
-        expiresAt: invites.expiresAt,
-      })
-      .from(invites)
-      .where(
-        and(
-          eq(invites.groupId, group.id),
-          isNull(invites.revokedAt),
-          gt(invites.expiresAt, now),
-        ),
-      )
-      .orderBy(desc(invites.createdAt))
-      .limit(20),
+    role === "owner"
+      ? db
+          .select({
+            token: invites.token,
+            expiresAt: invites.expiresAt,
+          })
+          .from(invites)
+          .where(
+            and(
+              eq(invites.groupId, group.id),
+              isNull(invites.revokedAt),
+              gt(invites.expiresAt, now),
+            ),
+          )
+          .orderBy(desc(invites.createdAt))
+          .limit(20)
+      : Promise.resolve([]),
     db
       .select({
         userId: memberships.userId,
         name: users.name,
-        email: users.email,
+        // Members can identify each other by name, but addresses are owner-only data.
+        email: role === "owner" ? users.email : sql<string | null>`NULL`,
         role: memberships.role,
       })
       .from(memberships)
@@ -72,7 +79,54 @@ export default async function SettingsPage({ params }: SettingsPageProps) {
         </Link>
       </div>
 
-      <div className="max-w-4xl space-y-10 pt-6 pb-10">
+      <div className="w-full space-y-10 pt-6 pb-10">
+        {role === "owner" ? (
+          <section aria-labelledby="about-heading" className="border-b border-hairline pb-10">
+            <h2 id="about-heading" className="text-xl font-semibold tracking-tight text-ink">
+              About this group
+            </h2>
+            <p className="mt-2 text-sm text-muted">
+              A short description and an optional cover image, shown on the group feed.
+            </p>
+            <form action={updateGroupDetails.bind(null, slug)} className="mt-5 max-w-2xl space-y-4">
+              <div>
+                <label htmlFor="description" className="mb-1.5 block text-sm font-medium text-ink">
+                  Description <span className="font-normal text-faint">(optional)</span>
+                </label>
+                <textarea
+                  id="description"
+                  name="description"
+                  rows={3}
+                  maxLength={280}
+                  defaultValue={group.description ?? ""}
+                  placeholder="What is this circle for?"
+                  className="w-full resize-y rounded-lg border border-line bg-surface px-3 py-2.5 text-sm outline-none transition placeholder:text-faint focus:border-inverse focus:ring-2 focus:ring-inverse/10"
+                />
+              </div>
+              <div>
+                <label htmlFor="coverUrl" className="mb-1.5 block text-sm font-medium text-ink">
+                  Cover image URL <span className="font-normal text-faint">(optional, https)</span>
+                </label>
+                <input
+                  id="coverUrl"
+                  name="coverUrl"
+                  type="url"
+                  defaultValue={group.coverUrl ?? ""}
+                  placeholder="https://example.com/cover.jpg"
+                  className="w-full rounded-lg border border-line bg-surface px-3 py-2.5 text-sm outline-none transition placeholder:text-faint focus:border-inverse focus:ring-2 focus:ring-inverse/10"
+                />
+              </div>
+              <SubmitButton
+                pendingLabel="Saving…"
+                className="rounded-lg bg-inverse px-4 py-2.5 text-sm font-medium text-inverse-ink transition hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inverse focus-visible:ring-offset-2"
+              >
+                Save details
+              </SubmitButton>
+            </form>
+          </section>
+        ) : null}
+
+        {role === "owner" ? (
         <section aria-labelledby="invite-heading" className="border-b border-hairline pb-10">
           <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
             <div>
@@ -129,6 +183,7 @@ export default async function SettingsPage({ params }: SettingsPageProps) {
             </div>
           )}
         </section>
+        ) : null}
 
         <section aria-labelledby="members-heading">
           <div className="flex items-baseline justify-between gap-4">
@@ -136,19 +191,75 @@ export default async function SettingsPage({ params }: SettingsPageProps) {
             <p className="text-sm text-muted">{members.length} total</p>
           </div>
           <ul className="mt-5 divide-y divide-hairline border-t border-hairline">
-            {members.map((member) => (
-              <li key={member.userId} className="flex items-center justify-between gap-4 py-4">
-                <div className="min-w-0">
-                  <p className="truncate text-sm font-medium text-ink">{member.name}</p>
-                  <p className="truncate text-sm text-muted">{member.email}</p>
-                </div>
-                <span className="shrink-0 rounded-full bg-rail px-2.5 py-1 text-xs font-medium capitalize text-muted">
-                  {member.role}
-                </span>
-              </li>
-            ))}
+            {members.map((member) => {
+              const manageable = role === "owner" && member.userId !== viewer.id;
+              const nextRole = member.role === "owner" ? "member" : "owner";
+
+              return (
+                <li key={member.userId} className="flex items-center justify-between gap-4 py-4">
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium text-ink">{member.name}</p>
+                    {role === "owner" ? (
+                      <p className="truncate text-sm text-muted">{member.email}</p>
+                    ) : null}
+                  </div>
+                  <div className="flex shrink-0 items-center gap-2">
+                    <span className="rounded-full bg-rail px-2.5 py-1 text-xs font-medium capitalize text-muted">
+                      {member.role}
+                    </span>
+                    {manageable ? (
+                      <>
+                        <form action={setMemberRole.bind(null, slug, member.userId, nextRole)}>
+                          <SubmitButton
+                            pendingLabel="Saving…"
+                            className="rounded-lg border border-line bg-surface px-3 py-2 text-sm font-medium text-ink transition hover:bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inverse focus-visible:ring-offset-2"
+                          >
+                            {nextRole === "owner" ? "Make owner" : "Make member"}
+                          </SubmitButton>
+                        </form>
+                        <form action={removeMember.bind(null, slug, member.userId)}>
+                          <SubmitButton
+                            pendingLabel="Removing…"
+                            className="rounded-lg border border-line bg-surface px-3 py-2 text-sm font-medium text-ink transition hover:border-red-200 hover:bg-red-50 hover:text-red-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inverse focus-visible:ring-offset-2"
+                          >
+                            Remove
+                          </SubmitButton>
+                        </form>
+                      </>
+                    ) : null}
+                  </div>
+                </li>
+              );
+            })}
           </ul>
         </section>
+
+        {role === "owner" ? (
+          <section aria-labelledby="danger-heading" className="border-t border-hairline pt-10">
+            <h2 id="danger-heading" className="text-xl font-semibold tracking-tight text-red-700">
+              Danger zone
+            </h2>
+            <p className="mt-2 text-sm text-muted">
+              Deleting a group removes its members, invites, posts and comments. This cannot be undone.
+            </p>
+            <details className="mt-5">
+              <summary className="inline-flex cursor-pointer select-none rounded-lg border border-line bg-surface px-4 py-2.5 text-sm font-medium text-ink transition hover:border-red-200 hover:bg-red-50 hover:text-red-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inverse focus-visible:ring-offset-2">
+                Delete group
+              </summary>
+              <form action={deleteGroup.bind(null, slug)} className="mt-4">
+                <p className="mb-3 text-sm text-ink">
+                  Permanently delete <span className="font-semibold">{group.name}</span>?
+                </p>
+                <SubmitButton
+                  pendingLabel="Deleting…"
+                  className="rounded-lg bg-red-600 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-red-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-600 focus-visible:ring-offset-2"
+                >
+                  Yes, delete this group
+                </SubmitButton>
+              </form>
+            </details>
+          </section>
+        ) : null}
       </div>
     </main>
   );

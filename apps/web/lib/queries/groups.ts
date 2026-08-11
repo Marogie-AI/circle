@@ -66,7 +66,7 @@ export async function listTagFacets(groupId: string, limit = 12) {
   const result = await db.execute<{ tag: string; count: number }>(sql`
     SELECT unnest(${posts.tags}) AS tag, count(*)::int AS count
     FROM ${posts}
-    WHERE ${posts.groupId} = ${groupId}
+    WHERE ${posts.groupId} = ${groupId} AND ${posts.status} = 'published'
     GROUP BY 1
     ORDER BY count DESC, tag ASC
     LIMIT ${limit}

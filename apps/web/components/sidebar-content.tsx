@@ -2,6 +2,8 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { HugeiconsIcon } from "@hugeicons/react";
+import { BellIcon } from "@hugeicons/core-free-icons";
 import type { UserGroup } from "@/lib/queries/groups";
 import { UserMenu } from "@/components/user-menu";
 import { Wordmark } from "@/components/wordmark";
@@ -16,6 +18,8 @@ export type SidebarProps = {
   groups: UserGroup[];
   user: { name?: string | null; email: string };
   unread?: Record<string, number>;
+  /** Unread in-app notification count for the bell badge. */
+  unreadNotifications?: number;
   /** Mobile drawer passes a close handler; the desktop rail passes nothing. */
   onNavigate?: () => void;
   /** Icon-only rail. Desktop only — the mobile drawer is never collapsed. */
@@ -32,6 +36,7 @@ export function SidebarContent({
   groups,
   user,
   unread = {},
+  unreadNotifications = 0,
   onNavigate,
   collapsed = false,
   onToggleCollapse,
@@ -167,6 +172,38 @@ export function SidebarContent({
         >
           <PlusIcon size={16} />
           {collapsed ? null : "New group"}
+        </Link>
+
+        <Link
+          href="/notifications"
+          onClick={onNavigate}
+          aria-current={pathname === "/notifications" ? "page" : undefined}
+          className={`${link} ${
+            pathname === "/notifications"
+              ? "bg-rail font-medium text-ink"
+              : "text-muted hover:bg-hover hover:text-ink"
+          }`}
+        >
+          <HugeiconsIcon icon={BellIcon} size={16} strokeWidth={1.8} className="shrink-0" />
+          {collapsed ? null : (
+            <span className="min-w-0 flex-1 truncate">Notifications</span>
+          )}
+          {collapsed && unreadNotifications > 0 ? (
+            <span
+              role="img"
+              aria-label={`${unreadNotifications} unread`}
+              className="absolute right-2 top-2 h-1.5 w-1.5 rounded-full bg-inverse"
+            />
+          ) : null}
+          {!collapsed && unreadNotifications > 0 ? (
+            <span
+              role="img"
+              aria-label={`${unreadNotifications} unread`}
+              className="shrink-0 rounded-full bg-inverse px-1.5 py-0.5 text-[10px] font-semibold tabular-nums text-inverse-ink"
+            >
+              {unreadNotifications > 99 ? "99+" : unreadNotifications}
+            </span>
+          ) : null}
         </Link>
 
         <Link

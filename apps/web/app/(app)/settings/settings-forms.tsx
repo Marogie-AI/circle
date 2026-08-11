@@ -1,11 +1,13 @@
 "use client";
 
-import { useActionState } from "react";
+import { useActionState, useState } from "react";
 import {
   changePassword,
+  updateBio,
   updateDisplayName,
   type SettingsState,
 } from "@/app/(app)/settings/actions";
+import { ClearIcon, TickIcon } from "@/components/icons";
 
 const EMPTY: SettingsState = {};
 
@@ -14,17 +16,18 @@ const inputClass =
 const submitClass =
   "rounded-lg bg-inverse px-4 py-2.5 text-sm font-medium text-inverse-ink transition hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inverse focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60";
 
+// ✓ save / ✕ reset icon buttons that sit next to a field.
+const iconBtn =
+  "inline-flex h-[42px] w-[42px] shrink-0 items-center justify-center rounded-lg transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inverse focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-40";
+const saveBtn = `${iconBtn} bg-inverse text-inverse-ink hover:opacity-90`;
+const resetBtn = `${iconBtn} border border-line bg-surface text-muted hover:bg-hover hover:text-ink`;
+
+// Errors only — a successful save is already obvious from the field going inert.
 function Feedback({ state }: { state: SettingsState }) {
   if (state.error)
     return (
-      <p role="alert" className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
+      <p role="alert" className="text-sm text-red-600">
         {state.error}
-      </p>
-    );
-  if (state.ok)
-    return (
-      <p role="status" className="rounded-lg bg-rail px-3 py-2 text-sm text-ink">
-        {state.ok}
       </p>
     );
   return null;
@@ -32,13 +35,15 @@ function Feedback({ state }: { state: SettingsState }) {
 
 export function DisplayNameForm({ initialName }: { initialName: string }) {
   const [state, action, pending] = useActionState(updateDisplayName, EMPTY);
+  const [value, setValue] = useState(initialName);
+  const unchanged = value === initialName;
 
   return (
-    <form action={action} className="mt-5 space-y-4">
-      <div>
-        <label htmlFor="name" className="mb-1.5 block text-sm font-medium text-ink">
-          Display name
-        </label>
+    <form action={action} className="mt-5 space-y-2">
+      <label htmlFor="name" className="block text-sm font-medium text-ink">
+        Display name
+      </label>
+      <div className="flex items-center gap-2">
         <input
           id="name"
           name="name"
@@ -46,18 +51,76 @@ export function DisplayNameForm({ initialName }: { initialName: string }) {
           required
           minLength={1}
           maxLength={60}
-          defaultValue={initialName}
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
           disabled={pending}
-          className={inputClass}
+          className={`${inputClass} min-w-0 flex-1`}
         />
-        <p className="mt-1.5 text-xs text-muted">
-          Shown on your posts, comments and avatar.
-        </p>
+        {!unchanged ? (
+          <>
+            <button type="submit" aria-label="Save name" disabled={pending} className={saveBtn}>
+              <TickIcon size={18} />
+            </button>
+            <button
+              type="button"
+              aria-label="Discard changes"
+              disabled={pending}
+              onClick={() => setValue(initialName)}
+              className={resetBtn}
+            >
+              <ClearIcon size={18} />
+            </button>
+          </>
+        ) : null}
       </div>
+      <p className="text-xs text-muted">Shown on your posts, comments and avatar.</p>
       <Feedback state={state} />
-      <button type="submit" disabled={pending} className={submitClass}>
-        {pending ? "Saving…" : "Save name"}
-      </button>
+    </form>
+  );
+}
+
+export function BioForm({ initialBio }: { initialBio: string }) {
+  const [state, action, pending] = useActionState(updateBio, EMPTY);
+  const [value, setValue] = useState(initialBio);
+  const unchanged = value === initialBio;
+
+  return (
+    <form action={action} className="mt-5 space-y-2">
+      <label htmlFor="bio" className="block text-sm font-medium text-ink">
+        Bio
+      </label>
+      <div className="flex items-start gap-2">
+        <textarea
+          id="bio"
+          name="bio"
+          rows={3}
+          maxLength={200}
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          disabled={pending}
+          className={`${inputClass} min-w-0 flex-1 resize-none`}
+        />
+        {!unchanged ? (
+          <>
+            <button type="submit" aria-label="Save bio" disabled={pending} className={saveBtn}>
+              <TickIcon size={18} />
+            </button>
+            <button
+              type="button"
+              aria-label="Discard changes"
+              disabled={pending}
+              onClick={() => setValue(initialBio)}
+              className={resetBtn}
+            >
+              <ClearIcon size={18} />
+            </button>
+          </>
+        ) : null}
+      </div>
+      <p className="text-xs text-muted">
+        A short line about you, shown on your profile. Up to 200 characters.
+      </p>
+      <Feedback state={state} />
     </form>
   );
 }

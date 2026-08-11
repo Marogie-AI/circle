@@ -58,16 +58,28 @@ type ChromeProps = {
 };
 
 async function DesktopChrome({ userId, user }: ChromeProps) {
-  const { groups, unread } = await getChromeData(userId);
+  const { groups, unread, unreadNotifications } = await getChromeData(userId);
   return (
     <>
-      <AppSidebar groups={groups} user={user} unread={unread} />
+      <AppSidebar
+        groups={groups}
+        user={user}
+        unread={unread}
+        unreadNotifications={unreadNotifications}
+      />
       <CommandPalette groups={groups} />
     </>
   );
 }
 
 async function MobileChrome({ userId, user }: ChromeProps) {
-  const { groups, unread } = await getChromeData(userId);
-  return <MobileNav groups={groups} user={user} unread={unread} />;
+  const { groups, unread, unreadNotifications } = await getChromeData(userId);
+  return (
+    <MobileNav
+      groups={groups}
+      user={user}
+      unread={unread}
+      unreadNotifications={unreadNotifications}
+    />
+  );
 }

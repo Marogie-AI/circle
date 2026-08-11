@@ -7,6 +7,8 @@ import {
   updatePost,
   type PostActionState,
 } from "@/app/(app)/groups/[slug]/actions";
+import { MentionTextarea } from "@/components/mention-textarea";
+import type { Mentionable } from "@/lib/mentions";
 
 // Lazy: keeps ~144 KB of markdown machinery out of the initial compose payload. It
 // arrives on first Preview click. ssr:false because there is nothing to prerender —
@@ -34,10 +36,19 @@ export type PostDraft = {
   body: string;
   url: string | null;
   tags: string[];
+  status: string;
 };
 
 /** Shared by the new-post and edit-post pages so validation and layout can't diverge. */
-export function PostForm({ slug, post }: { slug: string; post?: PostDraft }) {
+export function PostForm({
+  slug,
+  post,
+  members,
+}: {
+  slug: string;
+  post?: PostDraft;
+  members: Mentionable[];
+}) {
   const [state, formAction, pending] = useActionState(
     async (_previous: PostActionState, formData: FormData) =>
       post ? updatePost(slug, post.id, formData) : createPost(slug, formData),
@@ -47,6 +58,7 @@ export function PostForm({ slug, post }: { slug: string; post?: PostDraft }) {
   const [title, setTitle] = useState(post?.title ?? "");
   const [body, setBody] = useState(post?.body ?? "");
   const [tab, setTab] = useState<"write" | "preview">("write");
+  const isDraft = post?.status === "draft";
 
   const tabClass = (active: boolean) =>
     `rounded-md px-2.5 py-1 text-xs font-medium transition ${
@@ -68,8 +80,8 @@ export function PostForm({ slug, post }: { slug: string; post?: PostDraft }) {
           id="title"
           name="title"
           type="text"
-          required
-          minLength={1}
+          required={!isDraft}
+          minLength={isDraft ? undefined : 1}
           maxLength={200}
           disabled={pending}
           value={title}
@@ -101,23 +113,24 @@ export function PostForm({ slug, post }: { slug: string; post?: PostDraft }) {
 
         {/* The textarea stays mounted while previewing so its value is still submitted
             and the caret position survives tab switching. */}
-        <textarea
+        <MentionTextarea
           id="body"
           name="body"
-          required
-          minLength={1}
+          members={members}
+          required={!isDraft}
+          minLength={isDraft ? undefined : 1}
           maxLength={10000}
           rows={14}
           disabled={pending}
           value={body}
-          onChange={(e) => setBody(e.target.value)}
+          onValueChange={setBody}
           className={`${field} resize-y leading-6 ${tab === "preview" ? "hidden" : ""}`}
-          placeholder="Add context, a takeaway, or a note for the group…"
+          placeholder="Add context, a takeaway, or a note for the group… use @ to mention"
         />
 
         {tab === "preview" ? (
           <div className="min-h-[22rem] rounded-lg border border-line bg-surface px-4 py-3 text-[0.95rem] leading-7 text-ink">
-            <MarkdownPreview body={body} />
+            <MarkdownPreview body={body} members={members} />
           </div>
         ) : (
           <p className="mt-1.5 text-xs text-muted">Markdown is supported.</p>
@@ -170,19 +183,38 @@ export function PostForm({ slug, post }: { slug: string; post?: PostDraft }) {
         </p>
       ) : null}
 
-      <button
-        type="submit"
-        disabled={pending}
-        className="w-full rounded-lg bg-inverse px-4 py-2.5 text-sm font-medium text-inverse-ink transition hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inverse focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
-      >
-        {pending
-          ? post
-            ? "Saving…"
-            : "Publishing…"
-          : post
-            ? "Save changes"
-            : "Publish post"}
-      </button>
+      <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+        {!post ? (
+          // Same form, different intent — the button's name/value rides along in the
+          // FormData, and createPost branches on it.
+          <button
+            type="submit"
+            name="intent"
+            value="draft"
+            // A draft must save even when the required title/body are blank.
+            formNoValidate
+            disabled={pending}
+            className="rounded-lg border border-line bg-surface px-4 py-2.5 text-sm font-medium text-ink transition hover:bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inverse focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {pending ? "Saving…" : "Save draft"}
+          </button>
+        ) : null}
+        <button
+          type="submit"
+          name="intent"
+          value="publish"
+          disabled={pending}
+          className="rounded-lg bg-inverse px-4 py-2.5 text-sm font-medium text-inverse-ink transition hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inverse focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {pending
+            ? post
+              ? "Saving…"
+              : "Publishing…"
+            : post
+              ? "Save changes"
+              : "Publish post"}
+        </button>
+      </div>
     </form>
   );
 }

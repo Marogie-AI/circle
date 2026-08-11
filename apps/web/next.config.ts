@@ -15,10 +15,16 @@ import type { NextConfig } from "next";
  * So: ship the directives that are strict and free, and revisit script-src if a
  * third-party script ever lands. img-src allows https: because post cards render
  * Open Graph images from arbitrary origins.
+ *
+ * 'unsafe-eval' is added to script-src in development only: React + Turbopack use
+ * eval() for dev-mode debugging (callstack reconstruction). It is never emitted in a
+ * production build, where React does not use eval() at all.
  */
+const isDev = process.env.NODE_ENV !== "production";
+
 const CONTENT_SECURITY_POLICY = [
   "default-src 'self'",
-  "script-src 'self' 'unsafe-inline'",
+  `script-src 'self' 'unsafe-inline'${isDev ? " 'unsafe-eval'" : ""}`,
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data: https:",
   "media-src 'self'",
