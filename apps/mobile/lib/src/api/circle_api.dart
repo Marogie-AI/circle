@@ -54,7 +54,11 @@ class CircleApi {
 
     final response = await _client.post(
       Uri.parse('$baseUrl/api/auth/sign-out'),
-      headers: {'authorization': 'Bearer $token'},
+      headers: {
+        'authorization': 'Bearer $token',
+        'content-type': 'application/json',
+      },
+      body: jsonEncode({}),
     );
     if (response.statusCode < 200 || response.statusCode >= 300) {
       throw ApiException(response.statusCode, 'Could not revoke the session');

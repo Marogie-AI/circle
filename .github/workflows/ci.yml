@@ -65,11 +65,47 @@ jobs:
 
       # drizzle/ is the only source of schema truth; the tests need the tables.
       - run: bun run db:migrate
+      - run: bun run db:check
+      - run: bun run db:verify
 
       - run: bun run typecheck
       - run: bun run test
       - run: bun run lint
       - run: bun run build
+
+      - name: Smoke-test production API routes
+        shell: bash
+        run: |
+          set -euo pipefail
+          log_file="$(mktemp)"
+          cd apps/web
+          bun run start -- --port 3002 >"$log_file" 2>&1 &
+          server_pid=$!
+          cleanup() {
+            kill "$server_pid" 2>/dev/null || true
+            wait "$server_pid" 2>/dev/null || true
+          }
+          trap cleanup EXIT
+
+          ready=false
+          for _ in {1..30}; do
+            status="$(curl --silent --output /dev/null --write-out '%{http_code}' http://localhost:3002/api/mobile/groups || true)"
+            if [ "$status" = "401" ]; then
+              ready=true
+              break
+            fi
+            sleep 1
+          done
+
+          if [ "$ready" != true ]; then
+            cat "$log_file"
+            exit 1
+          fi
+
+          if ! bun run test:smoke-api; then
+            cat "$log_file"
+            exit 1
+          fi
 
   mobile:
     runs-on: ubuntu-latest

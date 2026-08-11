@@ -92,6 +92,13 @@
       "when": 1786452970767,
       "tag": "0012_workable_pride",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1786475144233,
+      "tag": "0013_lovely_gunslinger",
+      "breakpoints": true
     }
   ]
 }

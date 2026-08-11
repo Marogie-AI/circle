@@ -13,17 +13,21 @@ import {
 } from "drizzle-orm/pg-core";
 import { user } from "./auth-schema";
 
-export const groups = pgTable("groups", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  name: text("name").notNull(),
-  slug: text("slug").notNull().unique(),
-  description: text("description"),
-  coverUrl: text("cover_url"),
-  createdBy: text("created_by")
-    .notNull()
-    .references(() => user.id),
-  createdAt: timestamp("created_at").notNull().defaultNow(),
-});
+export const groups = pgTable(
+  "groups",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    name: text("name").notNull(),
+    slug: text("slug").notNull().unique(),
+    description: text("description"),
+    coverUrl: text("cover_url"),
+    createdBy: text("created_by")
+      .notNull()
+      .references(() => user.id),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (table) => [index("groups_created_by_idx").on(table.createdBy)],
+);
 
 export const memberships = pgTable(
   "memberships",
@@ -39,7 +43,7 @@ export const memberships = pgTable(
   },
   (table) => [
     primaryKey({ columns: [table.groupId, table.userId] }),
-    index("memberships_user_id_idx").on(table.userId),
+    index("memberships_user_id_idx").on(table.userId, desc(table.joinedAt)),
   ],
 );
 
@@ -115,6 +119,14 @@ export const posts = pgTable(
       desc(table.createdAt),
       desc(table.id),
     ),
+    // Profile history is global to an author, not restricted to a particular group.
+    index("posts_author_published_created_idx")
+      .on(table.authorId, desc(table.createdAt))
+      .where(sql`${table.status} = 'published'`),
+    // Pinned posts use a different sort order from the chronological feed.
+    index("posts_group_pinned_idx")
+      .on(table.groupId, desc(table.pinnedAt))
+      .where(sql`${table.status} = 'published' and ${table.pinnedAt} is not null`),
   ],
 );
 
@@ -311,10 +323,11 @@ export const collectionPostAnnotations = pgTable(
       foreignColumns: [collectionPosts.collectionId, collectionPosts.postId],
       name: "collection_post_annotations_collection_post_fk",
     }).onDelete("cascade"),
+    // Collection views order every note in the collection, irrespective of post.
     index("collection_post_annotations_collection_post_updated_idx").on(
       table.collectionId,
-      table.postId,
       desc(table.updatedAt),
+      desc(table.authorId),
     ),
   ],
 );

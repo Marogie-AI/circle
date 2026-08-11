@@ -67,6 +67,8 @@ void main() {
     expect(api.isSignedIn, isFalse);
     expect(signOutRequest.url.path, '/api/auth/sign-out');
     expect(signOutRequest.headers['authorization'], 'Bearer T');
+    expect(signOutRequest.headers['content-type'], 'application/json');
+    expect(signOutRequest.body, '{}');
   });
 
   test('failed remote sign-out still clears the local token', () async {
