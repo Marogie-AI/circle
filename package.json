@@ -15,7 +15,10 @@
     "test": "bun --filter web test",
     "lint": "bun --filter web lint",
     "typecheck": "bun --filter web typecheck",
+    "db:check": "bun --filter web db:check",
     "db:generate": "bun --filter web db:generate",
-    "db:migrate": "bun --filter web db:migrate"
+    "db:migrate": "bun --filter web db:migrate",
+    "db:verify": "bun --filter web db:verify",
+    "test:smoke-api": "bun --filter web test:smoke-api"
   }
 }
