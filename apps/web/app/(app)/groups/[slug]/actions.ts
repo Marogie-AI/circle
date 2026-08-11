@@ -128,19 +128,21 @@ export async function publishDraft(slug: string, postId: string) {
     .set({ status: "published", createdAt: new Date() })
     .where(eq(posts.id, postId));
 
-  const groupMembers = await db
-    .select({ userId: memberships.userId })
-    .from(memberships)
-    .where(eq(memberships.groupId, group.id));
-  await notify(
-    groupMembers.map((member) => ({
-      userId: member.userId,
-      actorId: user.id,
-      type: "new_post" as const,
-      groupId: group.id,
-      postId,
-    })),
-  );
+  after(async () => {
+    const groupMembers = await db
+      .select({ userId: memberships.userId })
+      .from(memberships)
+      .where(eq(memberships.groupId, group.id));
+    await notify(
+      groupMembers.map((member) => ({
+        userId: member.userId,
+        actorId: user.id,
+        type: "new_post" as const,
+        groupId: group.id,
+        postId,
+      })),
+    );
+  });
 
   revalidatePath(`/groups/${slug}`);
   redirect(`/groups/${slug}/p/${postId}`);
@@ -378,19 +380,21 @@ export async function createPost(
 
   // Notify every other member that a new post landed. One row per member — fine at the
   // 50-member group ceiling. # ponytail: per-member fan-out, batch/digest if groups grow.
-  const groupMembers = await db
-    .select({ userId: memberships.userId })
-    .from(memberships)
-    .where(eq(memberships.groupId, group.id));
-  await notify(
-    groupMembers.map((member) => ({
-      userId: member.userId,
-      actorId: user.id,
-      type: "new_post" as const,
-      groupId: group.id,
-      postId: newPost.id,
-    })),
-  );
+  after(async () => {
+    const groupMembers = await db
+      .select({ userId: memberships.userId })
+      .from(memberships)
+      .where(eq(memberships.groupId, group.id));
+    await notify(
+      groupMembers.map((member) => ({
+        userId: member.userId,
+        actorId: user.id,
+        type: "new_post" as const,
+        groupId: group.id,
+        postId: newPost.id,
+      })),
+    );
+  });
 
   revalidatePath(`/groups/${slug}`);
   redirect(`/groups/${slug}/p/${newPost.id}`);

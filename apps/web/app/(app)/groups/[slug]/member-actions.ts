@@ -1,11 +1,13 @@
 "use server";
 
-import { and, count, eq, ne } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { db } from "@/db";
 import { groups, memberships } from "@/db/schema";
 import { requireMember } from "@/lib/guard";
+
+type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
 /**
  * The last-owner invariant is enforced here, not in the UI: authz and the guard both
@@ -22,26 +24,22 @@ async function requireOwner(slug: string) {
   return group;
 }
 
-async function isSoleOwner(groupId: string, userId: string) {
-  // Is `userId` an owner, and are there no OTHER owners? Cheap: count other owners.
-  const [target] = await db
-    .select({ role: memberships.role })
+/**
+ * Lock this group's owner rows FOR UPDATE and reject if `userId` is the last one. Because
+ * concurrent demote/remove calls serialize on the same locked rows, two owners can't both
+ * observe the other as remaining and leave the group ownerless.
+ */
+async function assertNotLastOwner(tx: Tx, groupId: string, userId: string) {
+  const owners = await tx
+    .select({ userId: memberships.userId })
     .from(memberships)
-    .where(and(eq(memberships.groupId, groupId), eq(memberships.userId, userId)))
-    .limit(1);
-  if (target?.role !== "owner") return false;
+    .where(and(eq(memberships.groupId, groupId), eq(memberships.role, "owner")))
+    .for("update");
 
-  const [{ others }] = await db
-    .select({ others: count() })
-    .from(memberships)
-    .where(
-      and(
-        eq(memberships.groupId, groupId),
-        eq(memberships.role, "owner"),
-        ne(memberships.userId, userId),
-      ),
-    );
-  return others === 0;
+  const targetIsOwner = owners.some((o) => o.userId === userId);
+  if (targetIsOwner && owners.length === 1) {
+    throw new Error("This group must keep at least one owner.");
+  }
 }
 
 export async function setMemberRole(
@@ -51,16 +49,17 @@ export async function setMemberRole(
 ) {
   const group = await requireOwner(slug);
 
-  if (role === "member" && (await isSoleOwner(group.id, userId))) {
-    throw new Error("This group must keep at least one owner.");
-  }
-
-  await db
-    .update(memberships)
-    .set({ role })
-    .where(
-      and(eq(memberships.groupId, group.id), eq(memberships.userId, userId)),
-    );
+  await db.transaction(async (tx) => {
+    if (role === "member") {
+      await assertNotLastOwner(tx, group.id, userId);
+    }
+    await tx
+      .update(memberships)
+      .set({ role })
+      .where(
+        and(eq(memberships.groupId, group.id), eq(memberships.userId, userId)),
+      );
+  });
 
   revalidatePath(`/groups/${slug}/settings`);
 }
@@ -68,15 +67,14 @@ export async function setMemberRole(
 export async function removeMember(slug: string, userId: string) {
   const group = await requireOwner(slug);
 
-  if (await isSoleOwner(group.id, userId)) {
-    throw new Error("This group must keep at least one owner.");
-  }
-
-  await db
-    .delete(memberships)
-    .where(
-      and(eq(memberships.groupId, group.id), eq(memberships.userId, userId)),
-    );
+  await db.transaction(async (tx) => {
+    await assertNotLastOwner(tx, group.id, userId);
+    await tx
+      .delete(memberships)
+      .where(
+        and(eq(memberships.groupId, group.id), eq(memberships.userId, userId)),
+      );
+  });
 
   revalidatePath(`/groups/${slug}/settings`);
 }
