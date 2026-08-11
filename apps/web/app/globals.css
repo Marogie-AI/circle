@@ -6,7 +6,7 @@
  * is a variable swap — and no component can end up half-converted.
  */
 @theme {
-  --color-canvas: oklch(0.985 0 0);   /* page background */
+  --color-canvas: oklch(0.945 0 0);   /* page background — light gray so white cards pop */
   --color-rail: oklch(0.97 0 0);      /* sidebar gutter */
   --color-surface: oklch(1 0 0);      /* cards, inputs */
   --color-elevated: oklch(1 0 0);     /* menus, popovers */

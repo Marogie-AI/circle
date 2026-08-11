@@ -239,6 +239,55 @@ export const groupReads = pgTable(
 );
 
 /**
+ * Named folders for saved posts. `groupId` null = a personal folder (filed via
+ * saved_posts.collection_id). `groupId` set = a SHARED collection: visible to every
+ * member of that group, and any member can add the group's posts to it via
+ * collection_posts. `userId` is always the creator.
+ */
+export const collections = pgTable(
+  "collections",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    groupId: uuid("group_id").references(() => groups.id, {
+      onDelete: "cascade",
+    }),
+    name: text("name").notNull(),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (table) => [
+    index("collections_user_idx").on(table.userId),
+    index("collections_group_idx").on(table.groupId),
+  ],
+);
+
+/** Posts filed into a SHARED (group) collection — contributed by any member. */
+export const collectionPosts = pgTable(
+  "collection_posts",
+  {
+    collectionId: uuid("collection_id")
+      .notNull()
+      .references(() => collections.id, { onDelete: "cascade" }),
+    postId: uuid("post_id")
+      .notNull()
+      .references(() => posts.id, { onDelete: "cascade" }),
+    addedBy: text("added_by")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.collectionId, table.postId] }),
+    index("collection_posts_collection_idx").on(
+      table.collectionId,
+      desc(table.createdAt),
+    ),
+  ],
+);
+
+/**
  * Personal bookmarks. Note the read path must always re-join memberships: a row here
  * outliving the user's membership must NOT keep the post visible in /saved.
  */
@@ -251,6 +300,15 @@ export const savedPosts = pgTable(
     postId: uuid("post_id")
       .notNull()
       .references(() => posts.id, { onDelete: "cascade" }),
+    // Which folder this bookmark lives in. Null = unfiled. Set-null on delete so
+    // deleting a collection keeps the bookmarks, just unfiles them.
+    collectionId: uuid("collection_id").references(() => collections.id, {
+      onDelete: "set null",
+    }),
+    // Read-later state. readAt null = unread. archivedAt null = active. Two independent
+    // facts, so unarchiving restores the prior read/unread state.
+    readAt: timestamp("read_at"),
+    archivedAt: timestamp("archived_at"),
     createdAt: timestamp("created_at").notNull().defaultNow(),
   },
   (table) => [

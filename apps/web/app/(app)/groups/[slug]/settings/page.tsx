@@ -128,6 +128,7 @@ export default async function SettingsPage({ params }: SettingsPageProps) {
           </section>
         ) : null}
 
+        {role === "owner" ? (
         <section aria-labelledby="invite-heading" className="border-b border-hairline pb-10">
           <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
             <div>
@@ -184,6 +185,7 @@ export default async function SettingsPage({ params }: SettingsPageProps) {
             </div>
           )}
         </section>
+        ) : null}
 
         <section aria-labelledby="members-heading">
           <div className="flex items-baseline justify-between gap-4">

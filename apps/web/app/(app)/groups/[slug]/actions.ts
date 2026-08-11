@@ -271,7 +271,8 @@ function authorOrOwner(role: string, userId: string) {
 }
 
 export async function createInvite(slug: string) {
-  const { group, user } = await requireMember(slug);
+  const { group, user, role } = await requireMember(slug);
+  if (role !== "owner") throw new Error("Only the owner can invite people.");
   const now = new Date();
 
   if (

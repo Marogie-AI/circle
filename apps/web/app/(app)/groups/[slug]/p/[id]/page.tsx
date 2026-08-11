@@ -28,8 +28,10 @@ import { ReactionBar } from "@/components/reaction-bar";
 import { MentionText } from "@/components/mention-text";
 import { MentionTextarea } from "@/components/mention-textarea";
 import { LinkCard } from "@/components/link-card";
+import { AddToCollection } from "@/components/add-to-collection";
 import { linkifyMarkdown } from "@/lib/mentions";
 import { listGroupMembers } from "@/lib/queries/groups";
+import { listGroupCollections } from "@/lib/queries/group-collections";
 import { SaveButton } from "@/components/save-button";
 import { PostActionsMenu } from "@/components/post-actions-menu";
 import { SubmitButton } from "@/components/submit-button";
@@ -92,6 +94,7 @@ export default async function PostPage({ params }: PostPageProps) {
     commentReactionCounts,
     myCommentReactions,
     groupMembers,
+    groupCollections,
   ] = await Promise.all([
     db
       .select({
@@ -157,6 +160,7 @@ export default async function PostPage({ params }: PostPageProps) {
         ),
       ),
     listGroupMembers(group.id),
+    listGroupCollections(group.id),
   ]);
   const counts = new Map(reactionCounts.map((row) => [row.emoji, row.count]));
   const selected = new Set(currentUserReactions.map((row) => row.emoji));
@@ -215,6 +219,7 @@ export default async function PostPage({ params }: PostPageProps) {
               </SubmitButton>
             </form>
           ) : null}
+          <AddToCollection slug={slug} postId={post.id} collections={groupCollections} />
           <Link href={`/groups/${slug}/new`} className={`${buttonStyles.secondary} gap-1.5`}>
             <PlusIcon size={16} />
             <span className="hidden sm:inline">New post</span>

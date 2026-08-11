@@ -9,7 +9,9 @@ import {
 import { FeedFilters } from "@/components/feed-filters";
 import { MarkSeen } from "@/components/mark-seen";
 import { SaveButton } from "@/components/save-button";
+import { ManageCollectionsButton } from "@/components/manage-collections-button";
 import { getFeedPage, getPinnedPosts, parseFeedSort } from "@/lib/queries/feed";
+import { listGroupCollections } from "@/lib/queries/group-collections";
 import { listGroupMembers, listTagFacets } from "@/lib/queries/groups";
 import { getLastSeen, markGroupSeen } from "@/lib/queries/reads";
 import { savedIdsFor } from "@/lib/queries/saved";
@@ -34,7 +36,7 @@ function first(value: string | string[] | undefined) {
 
 export default async function GroupPage({ params, searchParams }: GroupPageProps) {
   const { slug } = await params;
-  const { group, user } = await requireMember(slug);
+  const { group, user, role } = await requireMember(slug);
   const query = await searchParams;
   const tag = first(query.tag)?.trim() || null;
   const before = first(query.before) || null;
@@ -82,6 +84,7 @@ export default async function GroupPage({ params, searchParams }: GroupPageProps
   // where it would be confusing to see posts that ignore the active filter.
   const showPinned = !q && !tag && !author && !before;
   const pinned = showPinned ? await getPinnedPosts(group.id) : [];
+  const collections = await listGroupCollections(group.id);
 
   const savedIds = await savedIdsFor(user.id, rows.map((r) => r.id));
 
@@ -162,10 +165,13 @@ export default async function GroupPage({ params, searchParams }: GroupPageProps
         }
         actions={
           <>
-            <Link href={`/groups/${slug}/settings`} className={`${buttonStyles.secondary} gap-1.5`}>
-              <InviteIcon size={16} />
-              <span className="hidden sm:inline">Invite people</span>
-            </Link>
+            {role === "owner" ? (
+              <Link href={`/groups/${slug}/settings`} className={`${buttonStyles.secondary} gap-1.5`}>
+                <InviteIcon size={16} />
+                <span className="hidden sm:inline">Invite people</span>
+              </Link>
+            ) : null}
+            <ManageCollectionsButton slug={slug} collections={collections} />
             <Link href={`/groups/${slug}/drafts`} className={`${buttonStyles.secondary} gap-1.5`}>
               <span className="hidden sm:inline">Drafts</span>
               <span className="sm:hidden">✎</span>
@@ -246,11 +252,12 @@ export default async function GroupPage({ params, searchParams }: GroupPageProps
                         the heading sits over the title text rather than over the dot. */}
                     {/* Widths differ by breakpoint: on a phone the tag column is gone,
                         so title and author split the space the tags gave up. */}
-                    <th scope="col" className="w-[64%] py-3 pl-9 pr-5 font-medium sm:w-[52%]">
+                    <th scope="col" className="w-[64%] py-3 pl-9 pr-5 font-medium sm:w-[44%]">
                       Title
                     </th>
                     <th scope="col" className="hidden w-[28%] px-3 py-3 font-medium sm:table-cell">Tags</th>
                     <th scope="col" className="w-[24%] px-3 py-3 font-medium sm:w-[14%]">Author</th>
+                    <th scope="col" className="hidden px-3 py-3 font-medium sm:table-cell sm:w-[10%]">Date</th>
                     {/* Save control keeps its column but not a label — "Saved" as a
                         heading would read as a filter rather than a per-row toggle. */}
                     <th scope="col" className="w-[12%] px-3 py-3 sm:w-[6%] sm:px-5">
@@ -307,6 +314,12 @@ export default async function GroupPage({ params, searchParams }: GroupPageProps
                           </div>
                         </td>
                         <td className="truncate px-3 py-4 text-muted">{post.authorName}</td>
+                        <td className="hidden whitespace-nowrap px-3 py-4 text-muted sm:table-cell">
+                          {post.createdAt.toLocaleDateString(undefined, {
+                            month: "short",
+                            day: "numeric",
+                          })}
+                        </td>
                         <td className="whitespace-nowrap px-3 py-4 text-right text-muted sm:px-5">
                           <SaveButton
                             saved={savedIds.has(post.id)}

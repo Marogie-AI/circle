@@ -22,20 +22,12 @@ const iconBtn =
 const saveBtn = `${iconBtn} bg-inverse text-inverse-ink hover:opacity-90`;
 const resetBtn = `${iconBtn} border border-line bg-surface text-muted hover:bg-hover hover:text-ink`;
 
+// Errors only — a successful save is already obvious from the field going inert.
 function Feedback({ state }: { state: SettingsState }) {
-  // Compact inline confirmation — a full-width filled slab read as heavier than the
-  // action it was confirming.
   if (state.error)
     return (
       <p role="alert" className="text-sm text-red-600">
         {state.error}
-      </p>
-    );
-  if (state.ok)
-    return (
-      <p role="status" className="inline-flex items-center gap-1.5 text-sm text-emerald-600">
-        <span aria-hidden>✓</span>
-        {state.ok}
       </p>
     );
   return null;
@@ -64,23 +56,22 @@ export function DisplayNameForm({ initialName }: { initialName: string }) {
           disabled={pending}
           className={`${inputClass} min-w-0 flex-1`}
         />
-        <button
-          type="submit"
-          aria-label="Save name"
-          disabled={pending || unchanged}
-          className={saveBtn}
-        >
-          <TickIcon size={18} />
-        </button>
-        <button
-          type="button"
-          aria-label="Discard changes"
-          disabled={pending || unchanged}
-          onClick={() => setValue(initialName)}
-          className={resetBtn}
-        >
-          <ClearIcon size={18} />
-        </button>
+        {!unchanged ? (
+          <>
+            <button type="submit" aria-label="Save name" disabled={pending} className={saveBtn}>
+              <TickIcon size={18} />
+            </button>
+            <button
+              type="button"
+              aria-label="Discard changes"
+              disabled={pending}
+              onClick={() => setValue(initialName)}
+              className={resetBtn}
+            >
+              <ClearIcon size={18} />
+            </button>
+          </>
+        ) : null}
       </div>
       <p className="text-xs text-muted">Shown on your posts, comments and avatar.</p>
       <Feedback state={state} />
@@ -109,23 +100,22 @@ export function BioForm({ initialBio }: { initialBio: string }) {
           disabled={pending}
           className={`${inputClass} min-w-0 flex-1 resize-none`}
         />
-        <button
-          type="submit"
-          aria-label="Save bio"
-          disabled={pending || unchanged}
-          className={saveBtn}
-        >
-          <TickIcon size={18} />
-        </button>
-        <button
-          type="button"
-          aria-label="Discard changes"
-          disabled={pending || unchanged}
-          onClick={() => setValue(initialBio)}
-          className={resetBtn}
-        >
-          <ClearIcon size={18} />
-        </button>
+        {!unchanged ? (
+          <>
+            <button type="submit" aria-label="Save bio" disabled={pending} className={saveBtn}>
+              <TickIcon size={18} />
+            </button>
+            <button
+              type="button"
+              aria-label="Discard changes"
+              disabled={pending}
+              onClick={() => setValue(initialBio)}
+              className={resetBtn}
+            >
+              <ClearIcon size={18} />
+            </button>
+          </>
+        ) : null}
       </div>
       <p className="text-xs text-muted">
         A short line about you, shown on your profile. Up to 200 characters.
