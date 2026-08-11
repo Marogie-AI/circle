@@ -23,6 +23,7 @@ import {
   Settings02Icon,
   Sun03Icon,
   Tag01Icon,
+  Tick02Icon,
   UserAdd01Icon,
   UserGroupIcon,
 } from "@hugeicons/core-free-icons";
@@ -50,6 +51,7 @@ export const BackIcon = make(ArrowLeft02Icon);
 export const ChevronDownIcon = make(ArrowDown01Icon);
 export const ExternalIcon = make(ArrowUpRight01Icon);
 export const ClearIcon = make(Cancel01Icon);
+export const TickIcon = make(Tick02Icon);
 export const CommentIcon = make(Comment01Icon);
 export const ReactionIcon = make(FavouriteIcon);
 export const CopyIcon = make(Copy01Icon);
