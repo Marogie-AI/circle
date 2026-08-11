@@ -72,6 +72,9 @@ export function extractMentionIds(
  * mention typed inside a code span; acceptable, mentioning yourself inside backticks is
  * not a real case. Swap to a remark plugin if it ever bites.
  */
+const escapeMarkdownLinkText = (name: string) =>
+  name.replace(/[\\[\]()]/g, "\\$&");
+
 export function linkifyMarkdown(
   body: string,
   members: Mentionable[],
@@ -79,7 +82,7 @@ export function linkifyMarkdown(
   return splitMentions(body, members)
     .map((part) =>
       part.type === "mention"
-        ? `[@${part.member.name}](/u/${part.member.id})`
+        ? `[@${escapeMarkdownLinkText(part.member.name)}](/u/${part.member.id})`
         : part.value,
     )
     .join("");
