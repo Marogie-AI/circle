@@ -32,6 +32,7 @@ megabytes of PNGs.
 | Feed with pinned posts | Pinned strip above the feed — shows only on the unfiltered top-level view, never mid-filter or paginated |
 | Post detail | Markdown body, reaction bar with the user's own reaction highlighted, comments with their own reactions, `@name` mentions rendered |
 | Your drafts | A member's own unpublished posts; empty copy distinct from an empty feed |
+| Partial draft editing | A draft may be saved and re-saved without a title or body; only publishing requires both |
 | Draft, non-author | Someone else's draft is a 404 — must not reveal that a draft exists |
 
 ## Notifications
@@ -51,14 +52,14 @@ megabytes of PNGs.
 
 | State | What it must show |
 |---|---|
-| Group settings | Invite links (absolute URL derived from the request host), expiry, revoke, member roles |
+| Group settings | Invite links built from `BETTER_AUTH_URL`, expiry, revoke, member roles; email addresses are owner-only |
 | Member management | Owner-only: promote/demote/remove members; the last owner can be neither removed nor demoted |
 | Account settings | Editable display name and bio |
 
 ## The critical loop
 
 A brand-new person opens an invite link while logged out, is bounced to signup, signs up,
-lands **inside the group**, writes a post, and sees it in the feed. Record this end to end,
+confirms joining the group, writes a post, and sees it in the feed. Record this end to end,
 in one take, whenever auth or invites change.
 
 ## Reproduce

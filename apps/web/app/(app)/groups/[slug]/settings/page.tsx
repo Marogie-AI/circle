@@ -1,6 +1,5 @@
 import Link from "next/link";
-import { and, asc, desc, eq, gt, isNull } from "drizzle-orm";
-import { headers } from "next/headers";
+import { and, asc, desc, eq, gt, isNull, sql } from "drizzle-orm";
 import {
   createInvite,
   revokeInvite,
@@ -21,45 +20,44 @@ type SettingsPageProps = {
   params: Promise<{ slug: string }>;
 };
 
-function requestOrigin(host: string, forwardedProto: string | null) {
-  const proto =
-    forwardedProto?.split(",")[0]?.trim() ||
-    (host.startsWith("localhost") || host.startsWith("127.0.0.1")
-      ? "http"
-      : "https");
-
-  return `${proto}://${host}`;
+function applicationOrigin() {
+  // Production validates this setting at build time. Never derive an invite URL from
+  // Host/X-Forwarded-Proto: an untrusted proxy header could turn a copied invite into a
+  // link to an attacker's origin.
+  const configured = process.env.BETTER_AUTH_URL;
+  return configured ? new URL(configured).origin : "http://localhost:3002";
 }
 
 export default async function SettingsPage({ params }: SettingsPageProps) {
   const { slug } = await params;
   const { group, role, user: viewer } = await requireMember(slug);
-  const requestHeaders = await headers();
-  const host = requestHeaders.get("host") ?? "localhost";
-  const origin = requestOrigin(host, requestHeaders.get("x-forwarded-proto"));
+  const origin = applicationOrigin();
   const now = new Date();
 
   const [activeInvites, members] = await Promise.all([
-    db
-      .select({
-        token: invites.token,
-        expiresAt: invites.expiresAt,
-      })
-      .from(invites)
-      .where(
-        and(
-          eq(invites.groupId, group.id),
-          isNull(invites.revokedAt),
-          gt(invites.expiresAt, now),
-        ),
-      )
-      .orderBy(desc(invites.createdAt))
-      .limit(20),
+    role === "owner"
+      ? db
+          .select({
+            token: invites.token,
+            expiresAt: invites.expiresAt,
+          })
+          .from(invites)
+          .where(
+            and(
+              eq(invites.groupId, group.id),
+              isNull(invites.revokedAt),
+              gt(invites.expiresAt, now),
+            ),
+          )
+          .orderBy(desc(invites.createdAt))
+          .limit(20)
+      : Promise.resolve([]),
     db
       .select({
         userId: memberships.userId,
         name: users.name,
-        email: users.email,
+        // Members can identify each other by name, but addresses are owner-only data.
+        email: role === "owner" ? users.email : sql<string | null>`NULL`,
         role: memberships.role,
       })
       .from(memberships)
@@ -201,7 +199,9 @@ export default async function SettingsPage({ params }: SettingsPageProps) {
                 <li key={member.userId} className="flex items-center justify-between gap-4 py-4">
                   <div className="min-w-0">
                     <p className="truncate text-sm font-medium text-ink">{member.name}</p>
-                    <p className="truncate text-sm text-muted">{member.email}</p>
+                    {role === "owner" ? (
+                      <p className="truncate text-sm text-muted">{member.email}</p>
+                    ) : null}
                   </div>
                   <div className="flex shrink-0 items-center gap-2">
                     <span className="rounded-full bg-rail px-2.5 py-1 text-xs font-medium capitalize text-muted">

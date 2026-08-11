@@ -1,6 +1,6 @@
 "use server";
 
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { notFound } from "next/navigation";
 import { db } from "@/db";
@@ -53,7 +53,13 @@ export async function deleteCollection(id: string) {
   // Scoped to the caller; deleting sets saved_posts.collection_id to null (bookmarks stay).
   await db
     .delete(collections)
-    .where(and(eq(collections.id, id), eq(collections.userId, session.user.id)));
+    .where(
+      and(
+        eq(collections.id, id),
+        eq(collections.userId, session.user.id),
+        isNull(collections.groupId),
+      ),
+    );
   revalidatePath("/saved");
 }
 
@@ -65,12 +71,17 @@ export async function setSavedCollection(postId: string, collectionId: string) {
   let target: string | null = null;
   if (collectionId) {
     if (!isUuid(collectionId)) notFound();
-    // The collection must belong to the caller — never trust the posted id.
+    // The collection must be the caller's personal folder — never trust the posted id
+    // or allow a shared group collection to be used by the private saved-posts model.
     const [owned] = await db
       .select({ id: collections.id })
       .from(collections)
       .where(
-        and(eq(collections.id, collectionId), eq(collections.userId, session.user.id)),
+        and(
+          eq(collections.id, collectionId),
+          eq(collections.userId, session.user.id),
+          isNull(collections.groupId),
+        ),
       )
       .limit(1);
     if (!owned) notFound();
@@ -95,12 +106,19 @@ export async function toggleSaved(slug: string, postId: string) {
   const { group, user } = await requireMember(slug);
   if (!isUuid(postId)) notFound();
 
-  // confirm the post really is in the group we just authorised against
+  // Confirm the post really is published in the group we just authorised against. A raw
+  // postId alone would otherwise let a member bookmark an author-private draft.
   const { posts } = await import("@/db/schema");
   const [post] = await db
     .select({ id: posts.id })
     .from(posts)
-    .where(and(eq(posts.id, postId), eq(posts.groupId, group.id)))
+    .where(
+      and(
+        eq(posts.id, postId),
+        eq(posts.groupId, group.id),
+        eq(posts.status, "published"),
+      ),
+    )
     .limit(1);
   if (!post) notFound();
 

@@ -4,10 +4,12 @@ import {
   deleteGroupCollection,
   removeFromCollection,
 } from "@/app/(app)/groups/[slug]/collection-actions";
+import { CollectionAnnotations } from "@/components/collection-annotations";
 import { SubmitButton } from "@/components/submit-button";
 import { requireMember } from "@/lib/guard";
 import {
   getGroupCollection,
+  listCollectionPostAnnotations,
   listCollectionPosts,
 } from "@/lib/queries/group-collections";
 import { isUuid } from "@/lib/post";
@@ -22,12 +24,22 @@ function shortDate(date: Date) {
 
 export default async function CollectionPage({ params }: CollectionPageProps) {
   const { slug, id } = await params;
-  const { group } = await requireMember(slug);
+  const { group, user, role } = await requireMember(slug);
   if (!isUuid(id)) notFound();
 
   const collection = await getGroupCollection(id, group.id);
   if (!collection) notFound();
-  const items = await listCollectionPosts(id);
+  const [items, annotations] = await Promise.all([
+    listCollectionPosts(id),
+    listCollectionPostAnnotations(id),
+  ]);
+  const annotationsByPost = new Map<string, typeof annotations>();
+  for (const annotation of annotations) {
+    annotationsByPost.set(annotation.postId, [
+      ...(annotationsByPost.get(annotation.postId) ?? []),
+      annotation,
+    ]);
+  }
 
   return (
     <main className="min-h-full w-full min-w-0 px-6 pb-10 pt-9 sm:px-10 sm:pb-12">
@@ -61,34 +73,44 @@ export default async function CollectionPage({ params }: CollectionPageProps) {
         {items.length ? (
           <ul className="mt-6 divide-y divide-hairline rounded-2xl border border-line bg-surface shadow-sm">
             {items.map((post) => (
-              <li key={post.id} className="flex items-center gap-3 pr-3">
-                <Link
-                  href={`/groups/${slug}/p/${post.id}`}
-                  className="flex min-w-0 flex-1 items-center gap-3 py-3 pl-5 transition hover:bg-hover"
-                >
-                  {post.ogImage ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      src={post.ogImage}
-                      alt=""
-                      loading="lazy"
-                      referrerPolicy="no-referrer"
-                      className="hidden size-9 shrink-0 rounded-md object-cover sm:block"
-                    />
-                  ) : null}
-                  <span className="min-w-0 flex-1 truncate font-medium text-ink">{post.title}</span>
-                  <span className="hidden shrink-0 text-xs text-muted sm:block">
-                    {post.authorName} · {shortDate(post.createdAt)}
-                  </span>
-                </Link>
-                <form action={removeFromCollection.bind(null, slug, id, post.id)}>
-                  <SubmitButton
-                    pendingLabel="…"
-                    className="rounded-lg px-2.5 py-1 text-sm text-muted transition hover:text-red-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inverse"
+              <li key={post.id} className="min-w-0 px-5 py-3">
+                <div className="flex min-w-0 items-center gap-3">
+                  <Link
+                    href={`/groups/${slug}/p/${post.id}`}
+                    className="flex min-w-0 flex-1 items-center gap-3 rounded-lg transition hover:bg-hover"
                   >
-                    Remove
-                  </SubmitButton>
-                </form>
+                    {post.ogImage ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={post.ogImage}
+                        alt=""
+                        loading="lazy"
+                        referrerPolicy="no-referrer"
+                        className="hidden size-9 shrink-0 rounded-md object-cover sm:block"
+                      />
+                    ) : null}
+                    <span className="min-w-0 flex-1 truncate font-medium text-ink">{post.title}</span>
+                    <span className="hidden shrink-0 text-xs text-muted sm:block">
+                      {post.authorName} · {shortDate(post.createdAt)}
+                    </span>
+                  </Link>
+                  <form action={removeFromCollection.bind(null, slug, id, post.id)}>
+                    <SubmitButton
+                      pendingLabel="…"
+                      className="rounded-lg px-2.5 py-1 text-sm text-muted transition hover:text-red-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inverse"
+                    >
+                      Remove
+                    </SubmitButton>
+                  </form>
+                </div>
+                <CollectionAnnotations
+                  slug={slug}
+                  collectionId={id}
+                  postId={post.id}
+                  annotations={annotationsByPost.get(post.id) ?? []}
+                  currentUserId={user.id}
+                  canModerate={role === "owner"}
+                />
               </li>
             ))}
           </ul>

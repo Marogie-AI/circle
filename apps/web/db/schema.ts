@@ -2,6 +2,7 @@ export * from "./auth-schema";
 
 import { desc, sql } from "drizzle-orm";
 import {
+  foreignKey,
   index,
   integer,
   pgTable,
@@ -283,6 +284,37 @@ export const collectionPosts = pgTable(
     index("collection_posts_collection_idx").on(
       table.collectionId,
       desc(table.createdAt),
+    ),
+  ],
+);
+
+/**
+ * A member's plain-text rationale for one post in a shared collection. The composite
+ * foreign key means an annotation cannot outlive the collection item it explains.
+ */
+export const collectionPostAnnotations = pgTable(
+  "collection_post_annotations",
+  {
+    collectionId: uuid("collection_id").notNull(),
+    postId: uuid("post_id").notNull(),
+    authorId: text("author_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    body: text("body").notNull(),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.collectionId, table.postId, table.authorId] }),
+    foreignKey({
+      columns: [table.collectionId, table.postId],
+      foreignColumns: [collectionPosts.collectionId, collectionPosts.postId],
+      name: "collection_post_annotations_collection_post_fk",
+    }).onDelete("cascade"),
+    index("collection_post_annotations_collection_post_updated_idx").on(
+      table.collectionId,
+      table.postId,
+      desc(table.updatedAt),
     ),
   ],
 );

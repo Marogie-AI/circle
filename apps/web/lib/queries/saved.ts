@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { collections, savedPosts } from "@/db/schema";
 
@@ -44,7 +44,7 @@ export async function listCollections(userId: string) {
         eq(savedPosts.userId, userId),
       ),
     )
-    .where(eq(collections.userId, userId))
+    .where(and(eq(collections.userId, userId), isNull(collections.groupId)))
     .groupBy(collections.id, collections.name, collections.createdAt)
     .orderBy(desc(collections.createdAt));
 }
@@ -90,8 +90,10 @@ export async function listSavedPosts(
     JOIN groups g      ON g.id = p.group_id
     JOIN "user" u      ON u.id = p.author_id
     JOIN memberships m ON m.group_id = p.group_id AND m.user_id = ${userId}
+    LEFT JOIN collections c ON c.id = s.collection_id
     WHERE s.user_id = ${userId}
       AND p.status = 'published'
+      AND (s.collection_id IS NULL OR (c.user_id = ${userId} AND c.group_id IS NULL))
       ${collectionId ? sql`AND s.collection_id = ${collectionId}` : sql``}
       ${statePredicate}
     ORDER BY s.created_at DESC
@@ -117,8 +119,10 @@ export async function countUnreadSavedPosts(userId: string) {
     FROM saved_posts s
     JOIN posts p       ON p.id = s.post_id
     JOIN memberships m ON m.group_id = p.group_id AND m.user_id = ${userId}
+    LEFT JOIN collections c ON c.id = s.collection_id
     WHERE s.user_id = ${userId}
       AND p.status = 'published'
+      AND (s.collection_id IS NULL OR (c.user_id = ${userId} AND c.group_id IS NULL))
       AND s.archived_at IS NULL
       AND s.read_at IS NULL
   `);

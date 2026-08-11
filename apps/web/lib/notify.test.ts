@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { test } from "bun:test";
-import { eq, inArray } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
-import { groups, notifications, user } from "@/db/schema";
+import { groups, memberships, notifications, user } from "@/db/schema";
 import { notify } from "@/lib/notify";
 import {
   listNotifications,
@@ -32,6 +32,10 @@ test("notify drops self-rows; unread count and mark-read stay consistent", async
       slug: `nt-group-${suffix}`,
       createdBy: actorId,
     });
+    await db.insert(memberships).values([
+      { groupId, userId: recipientId, role: "member" },
+      { groupId, userId: actorId, role: "owner" },
+    ]);
 
     await notify([
       { userId: recipientId, actorId, type: "comment", groupId },
@@ -63,6 +67,16 @@ test("notify drops self-rows; unread count and mark-read stay consistent", async
       0,
       "mark-read clears the unread count",
     );
+
+    // Notification rows outlive a membership row. The read paths must enforce the same
+    // membership boundary as every other group-scoped surface.
+    await db
+      .delete(memberships)
+      .where(
+        and(eq(memberships.groupId, groupId), eq(memberships.userId, recipientId)),
+      );
+    assert.equal(await unreadNotificationCount(recipientId), 0);
+    assert.equal((await listNotifications(recipientId)).length, 0);
   } finally {
     await db
       .delete(notifications)

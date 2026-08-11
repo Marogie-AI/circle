@@ -4,9 +4,19 @@ import { and, eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { notFound, redirect } from "next/navigation";
 import { db } from "@/db";
-import { collectionPosts, collections, posts } from "@/db/schema";
+import {
+  collectionPostAnnotations,
+  collectionPosts,
+  collections,
+  posts,
+} from "@/db/schema";
 import { requireMember } from "@/lib/guard";
 import { isUuid } from "@/lib/post";
+import { allow } from "@/lib/rate-limit";
+
+export type CollectionAnnotationState = { error: string | null; saved: boolean };
+
+const ANNOTATION_LIMIT = { max: 30, windowSeconds: 60 };
 
 async function collectionInGroup(collectionId: string, groupId: string) {
   if (!isUuid(collectionId)) return false;
@@ -23,8 +33,45 @@ async function postInGroup(postId: string, groupId: string) {
   const [row] = await db
     .select({ id: posts.id })
     .from(posts)
-    .where(and(eq(posts.id, postId), eq(posts.groupId, groupId)))
+    .where(
+      and(
+        eq(posts.id, postId),
+        eq(posts.groupId, groupId),
+        eq(posts.status, "published"),
+      ),
+    )
     .limit(1);
+  return Boolean(row);
+}
+
+/**
+ * An annotation belongs to a collection item, not merely a collection and post that
+ * happen to be in the same group. This also keeps an annotation from being added
+ * after its post has been removed from the collection.
+ */
+async function collectionItemInGroup(
+  collectionId: string,
+  postId: string,
+  groupId: string,
+) {
+  if (!isUuid(collectionId) || !isUuid(postId)) return false;
+
+  const [row] = await db
+    .select({ collectionId: collectionPosts.collectionId })
+    .from(collectionPosts)
+    .innerJoin(collections, eq(collections.id, collectionPosts.collectionId))
+    .innerJoin(posts, eq(posts.id, collectionPosts.postId))
+    .where(
+      and(
+        eq(collectionPosts.collectionId, collectionId),
+        eq(collectionPosts.postId, postId),
+        eq(collections.groupId, groupId),
+        eq(posts.groupId, groupId),
+        eq(posts.status, "published"),
+      ),
+    )
+    .limit(1);
+
   return Boolean(row);
 }
 
@@ -77,7 +124,7 @@ export async function removeFromCollection(
   postId: string,
 ) {
   const { group } = await requireMember(slug);
-  if (!(await collectionInGroup(collectionId, group.id))) notFound();
+  if (!(await collectionItemInGroup(collectionId, postId, group.id))) notFound();
   await db
     .delete(collectionPosts)
     .where(
@@ -88,4 +135,76 @@ export async function removeFromCollection(
     );
   revalidatePath(`/groups/${slug}/collections/${collectionId}`);
   revalidatePath(`/groups/${slug}/p/${postId}`);
+}
+
+/** Create or replace the current member's one plain-text note on this collection item. */
+export async function saveCollectionAnnotation(
+  slug: string,
+  collectionId: string,
+  postId: string,
+  formData: FormData,
+): Promise<CollectionAnnotationState> {
+  const { group, user } = await requireMember(slug);
+  if (!(await collectionItemInGroup(collectionId, postId, group.id))) notFound();
+
+  const body = String(formData.get("body") ?? "").trim();
+  if (body.length < 1 || body.length > 500) {
+    return { error: "Note must be between 1 and 500 characters.", saved: false };
+  }
+  if (
+    !(await allow(
+      `collection-annotation:${user.id}`,
+      ANNOTATION_LIMIT.max,
+      ANNOTATION_LIMIT.windowSeconds,
+    ))
+  ) {
+    return {
+      error: "You are adding notes very fast. Wait a moment and try again.",
+      saved: false,
+    };
+  }
+
+  await db
+    .insert(collectionPostAnnotations)
+    .values({ collectionId, postId, authorId: user.id, body })
+    .onConflictDoUpdate({
+      target: [
+        collectionPostAnnotations.collectionId,
+        collectionPostAnnotations.postId,
+        collectionPostAnnotations.authorId,
+      ],
+      set: { body, updatedAt: new Date() },
+    });
+
+  revalidatePath(`/groups/${slug}/collections/${collectionId}`);
+  return { error: null, saved: true };
+}
+
+/** Authors delete their own notes; group owners may remove any note for moderation. */
+export async function deleteCollectionAnnotation(
+  slug: string,
+  collectionId: string,
+  postId: string,
+  authorId: string,
+) {
+  const { group, user, role } = await requireMember(slug);
+  if (!isUuid(authorId)) notFound();
+  if (!(await collectionItemInGroup(collectionId, postId, group.id))) notFound();
+
+  const [deleted] = await db
+    .delete(collectionPostAnnotations)
+    .where(
+      and(
+        eq(collectionPostAnnotations.collectionId, collectionId),
+        eq(collectionPostAnnotations.postId, postId),
+        eq(collectionPostAnnotations.authorId, authorId),
+        role === "owner"
+          ? undefined
+          : eq(collectionPostAnnotations.authorId, user.id),
+      ),
+    )
+    .returning({ authorId: collectionPostAnnotations.authorId });
+  if (!deleted) notFound();
+
+  revalidatePath(`/groups/${slug}/collections/${collectionId}`);
 }

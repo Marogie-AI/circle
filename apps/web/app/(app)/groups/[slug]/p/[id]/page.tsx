@@ -183,6 +183,10 @@ export default async function PostPage({ params }: PostPageProps) {
   // presentational only — the actions re-check this in their own WHERE clause
   const canManagePost = role === "owner" || post.authorId === user.id;
   const totalReactions = reactionCounts.reduce((sum, row) => sum + row.count, 0);
+  const contentLayout =
+    post.status === "published"
+      ? "grid min-w-0 gap-12 py-10 lg:grid-cols-[minmax(0,1fr)_300px]"
+      : "min-w-0 py-10";
 
   return (
     <main className="min-h-full w-full min-w-0 px-6 pb-10 pt-9 sm:px-10 sm:pb-12">
@@ -192,14 +196,16 @@ export default async function PostPage({ params }: PostPageProps) {
           <span className="truncate">{group.name}</span>
         </Link>
         <div className="flex shrink-0 items-center gap-2">
-          <SaveButton
-            saved={saved}
-            variant="labelled"
-            onToggle={async () => {
-              "use server";
-              await toggleSaved(slug, post.id);
-            }}
-          />
+          {post.status === "published" ? (
+            <SaveButton
+              saved={saved}
+              variant="labelled"
+              onToggle={async () => {
+                "use server";
+                await toggleSaved(slug, post.id);
+              }}
+            />
+          ) : null}
           {role === "owner" && post.status !== "draft" ? (
             <form
               action={async () => {
@@ -219,7 +225,9 @@ export default async function PostPage({ params }: PostPageProps) {
               </SubmitButton>
             </form>
           ) : null}
-          <AddToCollection slug={slug} postId={post.id} collections={groupCollections} />
+          {post.status === "published" ? (
+            <AddToCollection slug={slug} postId={post.id} collections={groupCollections} />
+          ) : null}
           <Link href={`/groups/${slug}/new`} className={`${buttonStyles.secondary} gap-1.5`}>
             <PlusIcon size={16} />
             <span className="hidden sm:inline">New post</span>
@@ -255,7 +263,7 @@ export default async function PostPage({ params }: PostPageProps) {
 
       {/* P2: body keeps a reading measure on the left, reactions + comments ride a
           sticky rail on the right. Stacks to one column below lg. */}
-      <div className="grid min-w-0 gap-12 py-10 lg:grid-cols-[minmax(0,1fr)_300px]">
+      <div className={contentLayout}>
       <article className="min-w-0 max-w-[68ch]">
         <h1 className="text-[2rem] font-semibold leading-[1.15] tracking-tight text-ink">{post.title}</h1>
         <div className="mt-4 flex items-center gap-2 text-sm text-muted">
@@ -310,6 +318,7 @@ export default async function PostPage({ params }: PostPageProps) {
 
       </article>
 
+      {post.status === "published" ? (
       <aside className="min-w-0 lg:sticky lg:top-6 lg:h-fit">
         <section aria-label="Reactions" className="border-t border-hairline pt-4">
           <ReactionBar
@@ -400,6 +409,7 @@ export default async function PostPage({ params }: PostPageProps) {
             "Add a comment…", so a second "no comments yet" panel is redundant noise */}
       </section>
       </aside>
+      ) : null}
       </div>
     </main>
   );

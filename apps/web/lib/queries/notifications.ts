@@ -1,11 +1,18 @@
 import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { groups, notifications, posts, user } from "@/db/schema";
+import { groups, memberships, notifications, posts, user } from "@/db/schema";
 
 export async function unreadNotificationCount(userId: string) {
   const [row] = await db
     .select({ count: sql<number>`count(*)::int` })
     .from(notifications)
+    .innerJoin(
+      memberships,
+      and(
+        eq(memberships.groupId, notifications.groupId),
+        eq(memberships.userId, userId),
+      ),
+    )
     .where(
       and(eq(notifications.userId, userId), isNull(notifications.readAt)),
     );
@@ -45,6 +52,13 @@ export async function listNotifications(
     .from(notifications)
     .innerJoin(user, eq(user.id, notifications.actorId))
     .innerJoin(groups, eq(groups.id, notifications.groupId))
+    .innerJoin(
+      memberships,
+      and(
+        eq(memberships.groupId, notifications.groupId),
+        eq(memberships.userId, userId),
+      ),
+    )
     .leftJoin(posts, eq(posts.id, notifications.postId))
     .where(eq(notifications.userId, userId))
     .orderBy(desc(notifications.createdAt))

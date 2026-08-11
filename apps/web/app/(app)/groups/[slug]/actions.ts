@@ -94,7 +94,7 @@ export async function updateGroupDetails(slug: string, formData: FormData) {
 export async function pinPost(slug: string, postId: string) {
   const { group, role } = await requireMember(slug);
   if (role !== "owner") throw new Error("Only the owner can pin posts.");
-  if (!(await postInGroup(postId, group.id))) notFound();
+  if (!(await publishedPostInGroup(postId, group.id))) notFound();
   await db.update(posts).set({ pinnedAt: new Date() }).where(eq(posts.id, postId));
   revalidatePath(`/groups/${slug}`);
   revalidatePath(`/groups/${slug}/p/${postId}`);
@@ -103,7 +103,7 @@ export async function pinPost(slug: string, postId: string) {
 export async function unpinPost(slug: string, postId: string) {
   const { group, role } = await requireMember(slug);
   if (role !== "owner") throw new Error("Only the owner can unpin posts.");
-  if (!(await postInGroup(postId, group.id))) notFound();
+  if (!(await publishedPostInGroup(postId, group.id))) notFound();
   await db.update(posts).set({ pinnedAt: null }).where(eq(posts.id, postId));
   revalidatePath(`/groups/${slug}`);
   revalidatePath(`/groups/${slug}/p/${postId}`);
@@ -150,13 +150,20 @@ export async function publishDraft(slug: string, postId: string) {
   redirect(`/groups/${slug}/p/${postId}`);
 }
 
-async function postInGroup(postId: string, groupId: string) {
+/** A group member may interact only with posts that are visible to the group. */
+async function publishedPostInGroup(postId: string, groupId: string) {
   if (!isUuid(postId)) return false;
 
   const [post] = await db
     .select({ id: posts.id })
     .from(posts)
-    .where(and(eq(posts.id, postId), eq(posts.groupId, groupId)))
+    .where(
+      and(
+        eq(posts.id, postId),
+        eq(posts.groupId, groupId),
+        eq(posts.status, "published"),
+      ),
+    )
     .limit(1);
 
   return Boolean(post);
@@ -262,12 +269,14 @@ function attachPreview(postId: string, url: string | null) {
 }
 
 /**
- * Post mutations are allowed for the author, or for the group owner (moderation).
- * Returned as an extra predicate so it lands INSIDE the mutation's own WHERE clause —
- * a select-then-mutate would leave a window where membership changes in between.
+ * Post mutations are allowed for the author, or for the group owner when the post is
+ * published. Drafts remain author-private even from owners. Returned as an extra
+ * predicate so it lands INSIDE the mutation's own WHERE clause.
  */
-function authorOrOwner(role: string, userId: string) {
-  return role === "owner" ? undefined : eq(posts.authorId, userId);
+function authorOrOwnerOfPublishedPost(role: string, userId: string) {
+  return role === "owner"
+    ? or(eq(posts.authorId, userId), eq(posts.status, "published"))
+    : eq(posts.authorId, userId);
 }
 
 export async function createInvite(slug: string) {
@@ -324,7 +333,8 @@ export async function createInvite(slug: string) {
 }
 
 export async function revokeInvite(slug: string, token: string) {
-  const { group } = await requireMember(slug);
+  const { group, role } = await requireMember(slug);
+  if (role !== "owner") throw new Error("Only the owner can revoke invites.");
 
   await db
     .update(invites)
@@ -416,9 +426,27 @@ export async function updatePost(
   formData: FormData,
 ): Promise<PostActionState> {
   const { group, user, role } = await requireMember(slug);
-  const fields = readPostFields(formData);
-  if (!fields.ok) return { error: fields.error };
   if (!isUuid(postId)) notFound();
+
+  // A draft may remain incomplete while its author works on it. Reading the status here
+  // chooses the validator; matching it again in the UPDATE below prevents a concurrent
+  // publish from letting lenient draft validation overwrite a live post.
+  const [current] = await db
+    .select({ status: posts.status })
+    .from(posts)
+    .where(
+      and(
+        eq(posts.id, postId),
+        eq(posts.groupId, group.id),
+        authorOrOwnerOfPublishedPost(role, user.id),
+      ),
+    )
+    .limit(1);
+  if (!current) notFound();
+
+  const fields =
+    current.status === "draft" ? readDraftFields(formData) : readPostFields(formData);
+  if (!fields.ok) return { error: fields.error };
 
   const [updated] = await db
     .update(posts)
@@ -440,7 +468,8 @@ export async function updatePost(
       and(
         eq(posts.id, postId),
         eq(posts.groupId, group.id), // never a client-supplied group
-        authorOrOwner(role, user.id),
+        eq(posts.status, current.status),
+        authorOrOwnerOfPublishedPost(role, user.id),
       ),
     )
     .returning({ id: posts.id, url: posts.url });
@@ -472,7 +501,7 @@ export async function deletePost(slug: string, postId: string) {
       and(
         eq(posts.id, postId),
         eq(posts.groupId, group.id),
-        authorOrOwner(role, user.id),
+        authorOrOwnerOfPublishedPost(role, user.id),
       ),
     )
     .returning({ id: posts.id });
@@ -498,7 +527,7 @@ export async function updateComment(
   }
   if (!isUuid(commentId)) notFound();
   // scope the comment to a post that is genuinely in this group
-  if (!(await postInGroup(postId, group.id))) notFound();
+  if (!(await publishedPostInGroup(postId, group.id))) notFound();
 
   const [updated] = await db
     .update(comments)
@@ -523,7 +552,7 @@ export async function deleteComment(
 ) {
   const { group, user, role } = await requireMember(slug);
   if (!isUuid(commentId)) notFound();
-  if (!(await postInGroup(postId, group.id))) notFound();
+  if (!(await publishedPostInGroup(postId, group.id))) notFound();
 
   const [deleted] = await db
     .delete(comments)
@@ -557,12 +586,18 @@ export async function addComment(
     throw new Error("You are commenting very fast. Wait a moment and try again.");
   }
 
-  // Fetch the post (scoped to this group) to get its author for the notification —
-  // this doubles as the in-group check that postInGroup used to do.
+  // Fetch a published post (scoped to this group) to get its author for the
+  // notification. Drafts are private to their author and cannot be commented on.
   const [post] = await db
     .select({ authorId: posts.authorId })
     .from(posts)
-    .where(and(eq(posts.id, postId), eq(posts.groupId, group.id)))
+    .where(
+      and(
+        eq(posts.id, postId),
+        eq(posts.groupId, group.id),
+        eq(posts.status, "published"),
+      ),
+    )
     .limit(1);
   if (!post) notFound();
 
@@ -572,20 +607,19 @@ export async function addComment(
     .returning({ id: comments.id });
   revalidatePath(`/groups/${slug}/p/${postId}`);
 
-  await notify([
-    {
-      userId: post.authorId,
-      actorId: user.id,
-      type: "comment",
-      groupId: group.id,
-      postId,
-      commentId: comment.id,
-    },
-  ]);
-
-  // Mentions in the comment ping the named members. Deferred: best-effort, off the
-  // critical path (the comment is already saved and revalidated).
+  // Notifications are best-effort, off the critical path: a database failure after the
+  // comment was committed must not make the user retry and create duplicate content.
   after(async () => {
+    await notify([
+      {
+        userId: post.authorId,
+        actorId: user.id,
+        type: "comment",
+        groupId: group.id,
+        postId,
+        commentId: comment.id,
+      },
+    ]);
     const members = await listGroupMembers(group.id);
     await notify(
       extractMentionIds(body, members).map((id) => ({
@@ -614,7 +648,13 @@ export async function toggleReaction(
   const [post] = await db
     .select({ authorId: posts.authorId })
     .from(posts)
-    .where(and(eq(posts.id, postId), eq(posts.groupId, group.id)))
+    .where(
+      and(
+        eq(posts.id, postId),
+        eq(posts.groupId, group.id),
+        eq(posts.status, "published"),
+      ),
+    )
     .limit(1);
   if (!post) notFound();
 
@@ -646,15 +686,17 @@ export async function toggleReaction(
       .values({ postId, userId: user.id, emoji })
       .onConflictDoNothing();
     // Only on add, never on remove — a toggle spammer shouldn't spam notifications.
-    await notify([
-      {
-        userId: post.authorId,
-        actorId: user.id,
-        type: "reaction",
-        groupId: group.id,
-        postId,
-      },
-    ]);
+    after(async () => {
+      await notify([
+        {
+          userId: post.authorId,
+          actorId: user.id,
+          type: "reaction",
+          groupId: group.id,
+          postId,
+        },
+      ]);
+    });
   }
 
   revalidatePath(`/groups/${slug}/p/${postId}`);
@@ -671,7 +713,7 @@ export async function toggleCommentReaction(
   if (!(REACTION_EMOJIS as readonly string[]).includes(emoji)) {
     throw new Error("Unsupported reaction.");
   }
-  if (!isUuid(commentId) || !(await postInGroup(postId, group.id))) notFound();
+  if (!isUuid(commentId) || !(await publishedPostInGroup(postId, group.id))) notFound();
 
   // The comment must belong to this post (which we just confirmed is in this group).
   const [comment] = await db

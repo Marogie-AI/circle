@@ -44,6 +44,7 @@ export async function unreadCounts(userId: string): Promise<Map<string, number>>
       FROM posts p
       WHERE p.group_id = m.group_id
         AND p.created_at > coalesce(r.last_seen_at, 'epoch'::timestamp)
+        AND p.status = 'published'
         -- your own posts are never "unread" to you
         AND p.author_id <> m.user_id
     ) u

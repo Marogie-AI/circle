@@ -41,6 +41,9 @@ test("unread counts survive the lateral rewrite", async () => {
       // never-opened group: two by them, one by me
       { groupId: freshGroup, authorId: them, title: "A", body: "x", createdAt: t(-60_000) },
       { groupId: freshGroup, authorId: them, title: "B", body: "x", createdAt: t(-50_000) },
+      // Drafts are not visible to anyone but their author, so must not move another
+      // member's unread badge either.
+      { groupId: freshGroup, authorId: them, title: "Private draft", body: "x", status: "draft", createdAt: t(-45_000) },
       { groupId: freshGroup, authorId: me,   title: "Mine", body: "x", createdAt: t(-40_000) },
       // quiet group: one old post by them, and we will mark it seen afterwards
       { groupId: quietGroup, authorId: them, title: "Old", body: "x", createdAt: t(-90_000) },

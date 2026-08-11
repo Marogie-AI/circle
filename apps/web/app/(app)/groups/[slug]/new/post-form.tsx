@@ -36,6 +36,7 @@ export type PostDraft = {
   body: string;
   url: string | null;
   tags: string[];
+  status: string;
 };
 
 /** Shared by the new-post and edit-post pages so validation and layout can't diverge. */
@@ -57,6 +58,7 @@ export function PostForm({
   const [title, setTitle] = useState(post?.title ?? "");
   const [body, setBody] = useState(post?.body ?? "");
   const [tab, setTab] = useState<"write" | "preview">("write");
+  const isDraft = post?.status === "draft";
 
   const tabClass = (active: boolean) =>
     `rounded-md px-2.5 py-1 text-xs font-medium transition ${
@@ -78,8 +80,8 @@ export function PostForm({
           id="title"
           name="title"
           type="text"
-          required
-          minLength={1}
+          required={!isDraft}
+          minLength={isDraft ? undefined : 1}
           maxLength={200}
           disabled={pending}
           value={title}
@@ -115,8 +117,8 @@ export function PostForm({
           id="body"
           name="body"
           members={members}
-          required
-          minLength={1}
+          required={!isDraft}
+          minLength={isDraft ? undefined : 1}
           maxLength={10000}
           rows={14}
           disabled={pending}

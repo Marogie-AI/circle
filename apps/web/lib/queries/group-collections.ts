@@ -1,6 +1,12 @@
 import { and, desc, eq, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { collectionPosts, collections, posts, user } from "@/db/schema";
+import {
+  collectionPostAnnotations,
+  collectionPosts,
+  collections,
+  posts,
+  user,
+} from "@/db/schema";
 
 /** Shared collections in a group, with how many posts each holds. */
 export async function listGroupCollections(groupId: string) {
@@ -50,4 +56,28 @@ export async function listCollectionPosts(collectionId: string) {
       ),
     )
     .orderBy(desc(collectionPosts.createdAt));
+}
+
+/**
+ * Member notes for the items in one shared collection. The caller has already scoped
+ * the collection through requireMember/getGroupCollection before rendering these.
+ */
+export async function listCollectionPostAnnotations(collectionId: string) {
+  return db
+    .select({
+      collectionId: collectionPostAnnotations.collectionId,
+      postId: collectionPostAnnotations.postId,
+      authorId: collectionPostAnnotations.authorId,
+      authorName: user.name,
+      body: collectionPostAnnotations.body,
+      createdAt: collectionPostAnnotations.createdAt,
+      updatedAt: collectionPostAnnotations.updatedAt,
+    })
+    .from(collectionPostAnnotations)
+    .innerJoin(user, eq(user.id, collectionPostAnnotations.authorId))
+    .where(eq(collectionPostAnnotations.collectionId, collectionId))
+    .orderBy(
+      desc(collectionPostAnnotations.updatedAt),
+      desc(collectionPostAnnotations.authorId),
+    );
 }

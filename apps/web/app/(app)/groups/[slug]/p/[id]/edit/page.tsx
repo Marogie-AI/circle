@@ -24,6 +24,7 @@ export default async function EditPostPage({ params }: EditPageProps) {
       url: posts.url,
       tags: posts.tags,
       authorId: posts.authorId,
+      status: posts.status,
     })
     .from(posts)
     .where(and(eq(posts.id, id), eq(posts.groupId, group.id)))
@@ -32,9 +33,14 @@ export default async function EditPostPage({ params }: EditPageProps) {
   if (!post) notFound();
   const members = await listGroupMembers(group.id);
 
-  // Same rule the updatePost action enforces in its WHERE clause. Checked here too so
-  // a non-author never even sees the form — but the action is what actually protects it.
-  if (role !== "owner" && post.authorId !== user.id) notFound();
+  // Drafts are author-private. Owners can moderate published posts, but must never see
+  // another member's unfinished work. The action repeats this authorization check.
+  if (
+    (post.status === "draft" && post.authorId !== user.id) ||
+    (post.status !== "draft" && role !== "owner" && post.authorId !== user.id)
+  ) {
+    notFound();
+  }
 
   return (
     <main className="mx-auto min-h-full w-full max-w-4xl px-6 pb-10 pt-9 sm:pb-12">
