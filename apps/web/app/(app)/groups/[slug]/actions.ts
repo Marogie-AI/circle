@@ -17,8 +17,10 @@ import {
 } from "@/db/schema";
 import { requireMember } from "@/lib/guard";
 import { safeFetchPreview } from "@/lib/link-preview";
+import { extractMentionIds } from "@/lib/mentions";
 import { notify } from "@/lib/notify";
 import { isUuid, REACTION_EMOJIS } from "@/lib/post";
+import { listGroupMembers } from "@/lib/queries/groups";
 import { allow } from "@/lib/rate-limit";
 
 export type PostActionState = { error: string | null };
@@ -381,15 +383,22 @@ export async function createPost(
   // Notify every other member that a new post landed. One row per member — fine at the
   // 50-member group ceiling. # ponytail: per-member fan-out, batch/digest if groups grow.
   after(async () => {
-    const groupMembers = await db
-      .select({ userId: memberships.userId })
-      .from(memberships)
-      .where(eq(memberships.groupId, group.id));
+    const members = await listGroupMembers(group.id);
+    // Everyone gets the new-post ping; anyone named in the body also gets a mention.
     await notify(
-      groupMembers.map((member) => ({
-        userId: member.userId,
+      members.map((member) => ({
+        userId: member.id,
         actorId: user.id,
         type: "new_post" as const,
+        groupId: group.id,
+        postId: newPost.id,
+      })),
+    );
+    await notify(
+      extractMentionIds(fields.body, members).map((id) => ({
+        userId: id,
+        actorId: user.id,
+        type: "mention" as const,
         groupId: group.id,
         postId: newPost.id,
       })),
@@ -572,6 +581,22 @@ export async function addComment(
       commentId: comment.id,
     },
   ]);
+
+  // Mentions in the comment ping the named members. Deferred: best-effort, off the
+  // critical path (the comment is already saved and revalidated).
+  after(async () => {
+    const members = await listGroupMembers(group.id);
+    await notify(
+      extractMentionIds(body, members).map((id) => ({
+        userId: id,
+        actorId: user.id,
+        type: "mention" as const,
+        groupId: group.id,
+        postId,
+        commentId: comment.id,
+      })),
+    );
+  });
 }
 
 export async function toggleReaction(

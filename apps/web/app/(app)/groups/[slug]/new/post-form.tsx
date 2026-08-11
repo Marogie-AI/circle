@@ -7,6 +7,8 @@ import {
   updatePost,
   type PostActionState,
 } from "@/app/(app)/groups/[slug]/actions";
+import { MentionTextarea } from "@/components/mention-textarea";
+import type { Mentionable } from "@/lib/mentions";
 
 // Lazy: keeps ~144 KB of markdown machinery out of the initial compose payload. It
 // arrives on first Preview click. ssr:false because there is nothing to prerender —
@@ -37,7 +39,15 @@ export type PostDraft = {
 };
 
 /** Shared by the new-post and edit-post pages so validation and layout can't diverge. */
-export function PostForm({ slug, post }: { slug: string; post?: PostDraft }) {
+export function PostForm({
+  slug,
+  post,
+  members,
+}: {
+  slug: string;
+  post?: PostDraft;
+  members: Mentionable[];
+}) {
   const [state, formAction, pending] = useActionState(
     async (_previous: PostActionState, formData: FormData) =>
       post ? updatePost(slug, post.id, formData) : createPost(slug, formData),
@@ -101,23 +111,24 @@ export function PostForm({ slug, post }: { slug: string; post?: PostDraft }) {
 
         {/* The textarea stays mounted while previewing so its value is still submitted
             and the caret position survives tab switching. */}
-        <textarea
+        <MentionTextarea
           id="body"
           name="body"
+          members={members}
           required
           minLength={1}
           maxLength={10000}
           rows={14}
           disabled={pending}
           value={body}
-          onChange={(e) => setBody(e.target.value)}
+          onValueChange={setBody}
           className={`${field} resize-y leading-6 ${tab === "preview" ? "hidden" : ""}`}
-          placeholder="Add context, a takeaway, or a note for the group…"
+          placeholder="Add context, a takeaway, or a note for the group… use @ to mention"
         />
 
         {tab === "preview" ? (
           <div className="min-h-[22rem] rounded-lg border border-line bg-surface px-4 py-3 text-[0.95rem] leading-7 text-ink">
-            <MarkdownPreview body={body} />
+            <MarkdownPreview body={body} members={members} />
           </div>
         ) : (
           <p className="mt-1.5 text-xs text-muted">Markdown is supported.</p>

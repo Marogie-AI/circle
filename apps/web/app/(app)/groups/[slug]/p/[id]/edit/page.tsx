@@ -6,6 +6,7 @@ import { posts } from "@/db/schema";
 import { PostForm } from "@/app/(app)/groups/[slug]/new/post-form";
 import { BackIcon } from "@/components/icons";
 import { requireMember } from "@/lib/guard";
+import { listGroupMembers } from "@/lib/queries/groups";
 import { isUuid } from "@/lib/post";
 
 type EditPageProps = { params: Promise<{ slug: string; id: string }> };
@@ -29,6 +30,7 @@ export default async function EditPostPage({ params }: EditPageProps) {
     .limit(1);
 
   if (!post) notFound();
+  const members = await listGroupMembers(group.id);
 
   // Same rule the updatePost action enforces in its WHERE clause. Checked here too so
   // a non-author never even sees the form — but the action is what actually protects it.
@@ -50,7 +52,7 @@ export default async function EditPostPage({ params }: EditPageProps) {
         <h1 className="mt-1 text-2xl font-semibold tracking-tight text-ink">
           Edit post
         </h1>
-        <PostForm slug={slug} post={post} />
+        <PostForm slug={slug} post={post} members={members} />
       </section>
     </main>
   );

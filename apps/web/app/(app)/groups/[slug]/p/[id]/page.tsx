@@ -25,7 +25,11 @@ import {
 import { buttonStyles } from "@/components/page-header";
 import { BackIcon, PlusIcon } from "@/components/icons";
 import { ReactionBar } from "@/components/reaction-bar";
+import { MentionText } from "@/components/mention-text";
+import { MentionTextarea } from "@/components/mention-textarea";
 import { LinkCard } from "@/components/link-card";
+import { linkifyMarkdown } from "@/lib/mentions";
+import { listGroupMembers } from "@/lib/queries/groups";
 import { SaveButton } from "@/components/save-button";
 import { PostActionsMenu } from "@/components/post-actions-menu";
 import { SubmitButton } from "@/components/submit-button";
@@ -87,6 +91,7 @@ export default async function PostPage({ params }: PostPageProps) {
     saved,
     commentReactionCounts,
     myCommentReactions,
+    groupMembers,
   ] = await Promise.all([
     db
       .select({
@@ -151,6 +156,7 @@ export default async function PostPage({ params }: PostPageProps) {
           eq(commentReactions.userId, user.id),
         ),
       ),
+    listGroupMembers(group.id),
   ]);
   const counts = new Map(reactionCounts.map((row) => [row.emoji, row.count]));
   const selected = new Set(currentUserReactions.map((row) => row.emoji));
@@ -293,7 +299,7 @@ export default async function PostPage({ params }: PostPageProps) {
               td: ({ children }) => <td className="border border-line px-3 py-2">{children}</td>,
             }}
           >
-            {post.body}
+            {linkifyMarkdown(post.body, groupMembers)}
           </ReactMarkdown>
         </div>
 
@@ -324,7 +330,17 @@ export default async function PostPage({ params }: PostPageProps) {
         <h2 id="comments-heading" className="text-sm font-semibold tracking-tight text-ink">Comments <span className="font-normal text-faint">{commentRows.length}</span></h2>
         <form action={addComment.bind(null, slug, post.id)} className="mt-3">
           <label htmlFor="comment" className="sr-only">Add a comment</label>
-          <textarea id="comment" name="body" required minLength={1} maxLength={5000} rows={3} placeholder="Add a comment…" className="w-full resize-y rounded-xl border border-line bg-surface px-3 py-2.5 text-sm leading-6 outline-none transition placeholder:text-faint focus:border-inverse focus:ring-2 focus:ring-inverse/10" />
+          <MentionTextarea
+            id="comment"
+            name="body"
+            members={groupMembers}
+            required
+            minLength={1}
+            maxLength={5000}
+            rows={3}
+            placeholder="Add a comment… use @ to mention"
+            className="w-full resize-y rounded-xl border border-line bg-surface px-3 py-2.5 text-sm leading-6 outline-none transition placeholder:text-faint focus:border-inverse focus:ring-2 focus:ring-inverse/10"
+          />
           <div className="mt-3 flex justify-end">
             <SubmitButton
               pendingLabel="Posting…"
@@ -345,7 +361,11 @@ export default async function PostPage({ params }: PostPageProps) {
                     {comment.authorName}{" "}
                     <span className="font-normal text-faint">· {fullDate(comment.createdAt)}</span>
                   </p>
-                  <p className="mt-1 whitespace-pre-wrap break-words text-sm leading-6 text-muted">{comment.body}</p>
+                  <MentionText
+                    text={comment.body}
+                    members={groupMembers}
+                    className="mt-1 whitespace-pre-wrap break-words text-sm leading-6 text-muted"
+                  />
                   <div className="mt-2">
                     <ReactionBar
                       counts={commentCounts.get(comment.id) ?? {}}

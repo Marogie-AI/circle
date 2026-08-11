@@ -16,15 +16,18 @@ const submitClass =
   "rounded-lg bg-inverse px-4 py-2.5 text-sm font-medium text-inverse-ink transition hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inverse focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60";
 
 function Feedback({ state }: { state: SettingsState }) {
+  // Compact inline confirmation — a full-width filled slab read as heavier than the
+  // action it was confirming.
   if (state.error)
     return (
-      <p role="alert" className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
+      <p role="alert" className="text-sm text-red-600">
         {state.error}
       </p>
     );
   if (state.ok)
     return (
-      <p role="status" className="rounded-lg bg-rail px-3 py-2 text-sm text-ink">
+      <p role="status" className="inline-flex items-center gap-1.5 text-sm text-emerald-600">
+        <span aria-hidden>✓</span>
         {state.ok}
       </p>
     );

@@ -2,6 +2,7 @@
 
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { linkifyMarkdown, type Mentionable } from "@/lib/mentions";
 
 /**
  * Extracted so the compose form can pull it in with next/dynamic.
@@ -13,7 +14,13 @@ import remarkGfm from "remark-gfm";
  *
  * Still deliberately no rehype-raw — that would reopen raw HTML injection.
  */
-export function MarkdownPreview({ body }: { body: string }) {
+export function MarkdownPreview({
+  body,
+  members = [],
+}: {
+  body: string;
+  members?: Mentionable[];
+}) {
   if (!body.trim()) {
     return <p className="text-sm text-faint">Nothing to preview yet.</p>;
   }
@@ -53,7 +60,7 @@ export function MarkdownPreview({ body }: { body: string }) {
         ),
       }}
     >
-      {body}
+      {linkifyMarkdown(body, members)}
     </ReactMarkdown>
   );
 }
