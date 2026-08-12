@@ -11,21 +11,28 @@ import {
   Delete02Icon,
   Edit02Icon,
   Copy01Icon,
+  Grid2X2Icon,
+  LayoutTable01Icon,
   FavouriteIcon,
   Logout03Icon,
   Menu02Icon,
   Moon02Icon,
   MoreHorizontalIcon,
+  NewsIcon,
   PanelLeftCloseIcon,
   PanelLeftOpenIcon,
+  PlayIcon,
   PlusSignIcon,
   Search01Icon,
   Settings02Icon,
+  StickyNote01Icon,
   Sun03Icon,
   Tag01Icon,
   Tick02Icon,
   UserAdd01Icon,
   UserGroupIcon,
+  Video01Icon,
+  Wrench01Icon,
 } from "@hugeicons/core-free-icons";
 import type { ComponentProps } from "react";
 
@@ -70,3 +77,14 @@ export const EditIcon = make(Edit02Icon);
 export const DeleteIcon = make(Delete02Icon);
 export const SunIcon = make(Sun03Icon);
 export const MoonIcon = make(Moon02Icon);
+
+// Feed layout toggle.
+export const CardsViewIcon = make(Grid2X2Icon);
+export const TableViewIcon = make(LayoutTable01Icon);
+
+// One per post kind, plus the play glyph overlaid on a video card's thumbnail.
+export const PlayFilledIcon = make(PlayIcon);
+export const VideoIcon = make(Video01Icon);
+export const ArticleIcon = make(NewsIcon);
+export const ToolIcon = make(Wrench01Icon);
+export const NoteIcon = make(StickyNote01Icon);

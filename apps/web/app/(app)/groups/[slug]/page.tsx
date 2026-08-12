@@ -8,8 +8,13 @@ import {
 } from "@/components/icons";
 import { FeedFilters } from "@/components/feed-filters";
 import { MarkSeen } from "@/components/mark-seen";
+import { PostCard } from "@/components/post-card";
+import { PostTable } from "@/components/post-table";
 import { SaveButton } from "@/components/save-button";
+import { ViewToggle } from "@/components/view-toggle";
 import { ManageCollectionsButton } from "@/components/manage-collections-button";
+import { DEFAULT_FEED_VIEW, parseFeedView } from "@/lib/feed-view";
+import { KIND_LABELS, parsePostKind } from "@/lib/kind";
 import { getFeedPage, getPinnedPosts, parseFeedSort } from "@/lib/queries/feed";
 import { listGroupCollections } from "@/lib/queries/group-collections";
 import { listGroupMembers, listTagFacets } from "@/lib/queries/groups";
@@ -24,6 +29,8 @@ type GroupPageProps = {
   searchParams: Promise<{
     tag?: string | string[];
     author?: string | string[];
+    kind?: string | string[];
+    view?: string | string[];
     sort?: string | string[];
     before?: string | string[];
     q?: string | string[];
@@ -43,6 +50,9 @@ export default async function GroupPage({ params, searchParams }: GroupPageProps
   const q = first(query.q)?.trim() || null;
   const sort = parseFeedSort(first(query.sort));
   const requestedAuthor = first(query.author)?.trim() || null;
+  // Unknown kinds become "no filter" rather than an error — same posture as the sort.
+  const kind = parsePostKind(first(query.kind));
+  const view = parseFeedView(first(query.view));
 
   const [lastSeen, members, tagFacets] = await Promise.all([
     getLastSeen(group.id, user.id),
@@ -63,6 +73,7 @@ export default async function GroupPage({ params, searchParams }: GroupPageProps
         groupId: group.id,
         tag,
         authorId: author?.id ?? null,
+        kind,
         sort,
         cursor: before,
       });
@@ -76,13 +87,16 @@ export default async function GroupPage({ params, searchParams }: GroupPageProps
         authorName: hit.authorName,
         commentCount: 0,
         reactionCount: 0,
-        ogImage: null as string | null,
+        ogImage: hit.ogImage ?? null,
+        url: hit.url ?? null,
+        kind: hit.kind ?? null,
+        excerpt: hit.excerpt ?? null,
       }))
     : (feed?.items ?? []);
 
   // Pinned strip shows only on the plain top-level view — never mid-filter or paginated,
   // where it would be confusing to see posts that ignore the active filter.
-  const showPinned = !q && !tag && !author && !before;
+  const showPinned = !q && !tag && !author && !kind && !before;
   const pinned = showPinned ? await getPinnedPosts(group.id) : [];
   const collections = await listGroupCollections(group.id);
 
@@ -92,17 +106,34 @@ export default async function GroupPage({ params, searchParams }: GroupPageProps
   const loadMoreParams = new URLSearchParams();
   if (tag) loadMoreParams.set("tag", tag);
   if (author) loadMoreParams.set("author", author.id);
+  if (kind) loadMoreParams.set("kind", kind);
+  if (view !== DEFAULT_FEED_VIEW) loadMoreParams.set("view", view);
   if (sort !== "new") loadMoreParams.set("sort", sort);
   if (feed?.nextCursor) loadMoreParams.set("before", feed.nextCursor);
 
   /** URL with one filter dropped, for the dismiss buttons on the chips. */
-  function urlWithout(key: "tag" | "author") {
+  function urlWithout(key: "tag" | "author" | "kind") {
     const next = new URLSearchParams();
     if (tag && key !== "tag") next.set("tag", tag);
     if (author && key !== "author") next.set("author", author.id);
+    if (kind && key !== "kind") next.set("kind", kind);
+    // Layout is not a filter — clearing a filter must never reset it.
+    if (view !== DEFAULT_FEED_VIEW) next.set("view", view);
     if (sort !== "new") next.set("sort", sort);
     const queryString = next.toString();
     return queryString ? `/groups/${slug}?${queryString}` : `/groups/${slug}`;
+  }
+
+  /**
+   * Unseen since this member's last visit. One definition, shared by both layouts — the
+   * card grid and the table showed the same dot from two copies of this before.
+   */
+  function isUnseen(post: { authorName: string; createdAt: Date }) {
+    return (
+      !q &&
+      post.authorName !== (user.name ?? "") &&
+      (!lastSeen || post.createdAt > lastSeen)
+    );
   }
 
   const chip =
@@ -132,9 +163,44 @@ export default async function GroupPage({ params, searchParams }: GroupPageProps
         />
       ) : null}
 
+      {/* No eyebrow: every group in this app is private, so "Private group" above the
+          name said nothing the user did not already know. */}
       <PageHeader
-        eyebrow="Private group"
-        title={group.name}
+        title={
+          // With a category selected the title becomes a breadcrumb. The group name is
+          // the link back to the unfiltered feed, so it does the job the dismissable
+          // chip used to do — one control instead of two saying the same thing.
+          kind ? (
+            <span className="flex min-w-0 items-center gap-1.5">
+              <Link
+                href={urlWithout("kind")}
+                className="min-w-0 shrink truncate text-muted transition hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inverse focus-visible:ring-offset-2"
+              >
+                {group.name}
+              </Link>
+              {/* Inline SVG rather than an icon from components/icons.tsx: that module
+                  is "use client", so pulling a glyph from it into this server component
+                  creates a client reference for what is pure decoration. A separator
+                  does not need to cross that boundary. */}
+              <svg
+                role="presentation"
+                aria-hidden="true"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth={2}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className="size-5 shrink-0 text-faint"
+              >
+                <path d="M9 6l6 6-6 6" />
+              </svg>
+              <span className="shrink-0">{KIND_LABELS[kind]}</span>
+            </span>
+          ) : (
+            group.name
+          )
+        }
         meta={
           <>
             {tag ? (
@@ -161,6 +227,7 @@ export default async function GroupPage({ params, searchParams }: GroupPageProps
                 </Link>
               </span>
             ) : null}
+            {/* No chip for the category — it lives in the breadcrumb above. */}
           </>
         }
         actions={
@@ -192,6 +259,10 @@ export default async function GroupPage({ params, searchParams }: GroupPageProps
         {/* Searching replaces the feed entirely, so the feed's own filters would be
             lying about what is on screen. They come back when the search clears. */}
         {tag ? <input type="hidden" name="tag" value={tag} /> : null}
+        {kind ? <input type="hidden" name="kind" value={kind} /> : null}
+        {view !== DEFAULT_FEED_VIEW ? (
+          <input type="hidden" name="view" value={view} />
+        ) : null}
         <div className="relative min-w-0 flex-1 sm:max-w-sm">
           <SearchIcon
             size={16}
@@ -218,6 +289,8 @@ export default async function GroupPage({ params, searchParams }: GroupPageProps
         ) : (
           <FeedFilters slug={slug} members={members} tags={tagFacets} />
         )}
+        {/* Layout stays available while searching — the hits render in it too. */}
+        <ViewToggle slug={slug} />
       </form>
 
       {pinned.length ? (
@@ -243,101 +316,48 @@ export default async function GroupPage({ params, searchParams }: GroupPageProps
 
       <section className="pb-10">
         {rows.length ? (
-          <div className="mt-6 overflow-hidden rounded-2xl border border-line bg-surface shadow-sm">
-            <div className="min-w-0 overflow-x-auto">
-              <table className="w-full table-fixed sm:min-w-[720px] border-collapse text-left text-sm">
-                <thead className="text-xs font-medium uppercase tracking-wide text-muted">
-                  <tr>
-                    {/* pl-9 = px-5 (20px) + the unread dot (6px) + its gap (10px), so
-                        the heading sits over the title text rather than over the dot. */}
-                    {/* Widths differ by breakpoint: on a phone the tag column is gone,
-                        so title and author split the space the tags gave up. */}
-                    <th scope="col" className="w-[64%] py-3 pl-9 pr-5 font-medium sm:w-[44%]">
-                      Title
-                    </th>
-                    <th scope="col" className="hidden w-[28%] px-3 py-3 font-medium sm:table-cell">Tags</th>
-                    <th scope="col" className="w-[24%] px-3 py-3 font-medium sm:w-[14%]">Author</th>
-                    <th scope="col" className="hidden px-3 py-3 font-medium sm:table-cell sm:w-[10%]">Date</th>
-                    {/* Save control keeps its column but not a label — "Saved" as a
-                        heading would read as a filter rather than a per-row toggle. */}
-                    <th scope="col" className="w-[12%] px-3 py-3 sm:w-[6%] sm:px-5">
-                      <span className="sr-only">Saved</span>
-                    </th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-hairline">
-                  {rows.map((post) => {
-                    const isNew =
-                      !q &&
-                      post.authorName !== (user.name ?? "") &&
-                      (!lastSeen || post.createdAt > lastSeen);
-                    return (
-                      <tr key={post.id} className="group align-middle transition hover:bg-hover">
-                        <td className="px-5 py-4">
-                          <div className="flex min-w-0 items-center gap-2.5">
-                            <span
-                              aria-hidden={!isNew}
-                              title={isNew ? "New since your last visit" : undefined}
-                              className={`size-1.5 shrink-0 rounded-full ${isNew ? "bg-inverse" : "bg-transparent"}`}
-                            />
-                            {post.ogImage ? (
-                              // eslint-disable-next-line @next/next/no-img-element
-                              <img
-                                src={post.ogImage}
-                                alt=""
-                                loading="lazy"
-                                referrerPolicy="no-referrer"
-                                className="hidden size-9 shrink-0 rounded-md object-cover sm:block"
-                              />
-                            ) : null}
-                            <Link
-                              href={`/groups/${slug}/p/${post.id}`}
-              prefetch
-                              title={post.title}
-                              className="block min-w-0 flex-1 truncate font-medium text-ink underline-offset-4 group-hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inverse focus-visible:ring-offset-2"
-                            >
-                              {post.title}
-                            </Link>
-                          </div>
-                        </td>
-                        <td className="hidden px-3 py-4 sm:table-cell">
-                          <div className="flex min-w-0 flex-wrap gap-1">
-                            {post.tags.map((postTag) => (
-                              <Link
-                                key={postTag}
-                                href={`/groups/${slug}?tag=${encodeURIComponent(postTag)}`}
-                                className="max-w-full truncate rounded-full bg-rail px-2 py-0.5 text-xs font-medium text-muted transition hover:bg-hover hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inverse focus-visible:ring-offset-2"
-                              >
-                                #{postTag}
-                              </Link>
-                            ))}
-                          </div>
-                        </td>
-                        <td className="truncate px-3 py-4 text-muted">{post.authorName}</td>
-                        <td className="hidden whitespace-nowrap px-3 py-4 text-muted sm:table-cell">
-                          {post.createdAt.toLocaleDateString(undefined, {
-                            month: "short",
-                            day: "numeric",
-                          })}
-                        </td>
-                        <td className="whitespace-nowrap px-3 py-4 text-right text-muted sm:px-5">
-                          <SaveButton
-                            saved={savedIds.has(post.id)}
-                            onToggle={async () => {
-                              "use server";
-                              await toggleSaved(slug, post.id);
-                            }}
-                          />
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
+          <>
+            {view === "table" ? (
+              <div className="mt-6 overflow-hidden rounded-2xl border border-line bg-surface shadow-sm">
+                <PostTable
+                  rows={rows}
+                  slug={slug}
+                  isNew={isUnseen}
+                  saveButton={(post) => (
+                    <SaveButton
+                      saved={savedIds.has(post.id)}
+                      onToggle={async () => {
+                        "use server";
+                        await toggleSaved(slug, post.id);
+                      }}
+                    />
+                  )}
+                />
+              </div>
+            ) : (
+              <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                {rows.map((post) => (
+                  <PostCard
+                    key={post.id}
+                    post={post}
+                    slug={slug}
+                    isNew={isUnseen(post)}
+                    saveButton={
+                      <SaveButton
+                        saved={savedIds.has(post.id)}
+                        onToggle={async () => {
+                          "use server";
+                          await toggleSaved(slug, post.id);
+                        }}
+                      />
+                    }
+                  />
+                ))}
+              </div>
+            )}
 
             {feed?.hasMore && feed.nextCursor ? (
-              <div className="border-t border-hairline px-5 py-4 text-center">
+              <div className="mt-6 text-center">
                 <Link
                   href={`/groups/${slug}?${loadMoreParams.toString()}`}
                   className={buttonStyles.secondary}
@@ -346,7 +366,7 @@ export default async function GroupPage({ params, searchParams }: GroupPageProps
                 </Link>
               </div>
             ) : null}
-          </div>
+          </>
         ) : (
           <div className="mt-6 rounded-2xl border border-dashed border-line px-6 py-14 text-center">
             <h2 className="font-semibold tracking-tight text-ink">
@@ -354,25 +374,34 @@ export default async function GroupPage({ params, searchParams }: GroupPageProps
                 ? `No results for “${q}”`
                 : tag
                   ? `Nothing tagged #${tag} yet`
-                  : before
-                    ? "You've reached the end"
-                    : "No posts yet"}
+                  : kind
+                    ? `No ${KIND_LABELS[kind].toLowerCase()}s here yet`
+                    : before
+                      ? "You've reached the end"
+                      : "No posts yet"}
             </h2>
             <p className="mx-auto mt-2 max-w-sm text-sm text-muted">
               {q
                 ? "Try fewer or different words."
-                : tag
+                : tag || kind
                   ? "Clear the filter to see everything your group has shared."
                   : "Share the first link, note or bit of advice with your circle."}
             </p>
             <div className="mt-5 flex justify-center gap-2">
-              {q || tag || before ? (
+              {q || tag || kind || before ? (
                 <Link href={`/groups/${slug}`} className={buttonStyles.secondary}>
                   Back to the feed
                 </Link>
               ) : null}
               {!q && !tag ? (
-                <Link href={`/groups/${slug}/new`} className={buttonStyles.primary}>
+                <Link
+                  href={
+                    kind
+                      ? `/groups/${slug}/new?kind=${kind}`
+                      : `/groups/${slug}/new`
+                  }
+                  className={buttonStyles.primary}
+                >
                   New post
                 </Link>
               ) : null}
