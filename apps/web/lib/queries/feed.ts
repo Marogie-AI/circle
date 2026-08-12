@@ -17,6 +17,7 @@ import {
   reactions,
   user,
 } from "@/db/schema";
+import type { PostKind } from "@/lib/kind";
 
 export type FeedCursor = {
   createdAt: Date;
@@ -62,6 +63,7 @@ type GetFeedPageOptions = {
   groupId: string;
   tag?: string | null;
   authorId?: string | null;
+  kind?: PostKind | null;
   sort?: FeedSort;
   cursor?: string | null;
   limit?: number;
@@ -71,6 +73,7 @@ export async function getFeedPage({
   groupId,
   tag,
   authorId,
+  kind,
   sort = "new",
   cursor,
   limit = 30,
@@ -104,6 +107,16 @@ export async function getFeedPage({
       createdAt: posts.createdAt,
       authorName: user.name,
       ogImage: posts.ogImage,
+      url: posts.url,
+      kind: posts.kind,
+      // Truncated in SQL, not in JS: bodies run to 10k chars and a page of 30 would ship
+      // ~300KB just to render a two-line excerpt on the cards.
+      excerpt: sql<string>`left(${posts.body}, 200)`.as("excerpt"),
+      coverUrl: posts.coverUrl,
+      coverAuthorName: posts.coverAuthorName,
+      coverAuthorUrl: posts.coverAuthorUrl,
+      coverLicenseName: posts.coverLicenseName,
+      coverLicenseUrl: posts.coverLicenseUrl,
       commentCount: sql<number>`(
         SELECT count(*)::int FROM ${comments} WHERE ${comments.postId} = ${posts.id}
       )`.as("comment_count"),
@@ -120,6 +133,7 @@ export async function getFeedPage({
         eq(posts.status, "published"),
         tag ? arrayContains(posts.tags, [tag]) : undefined,
         authorId ? eq(posts.authorId, authorId) : undefined,
+        kind ? eq(posts.kind, kind) : undefined,
         cursorPredicate,
       ),
     )
@@ -156,6 +170,16 @@ export async function getPinnedPosts(groupId: string, limit = 10) {
       createdAt: posts.createdAt,
       authorName: user.name,
       ogImage: posts.ogImage,
+      url: posts.url,
+      kind: posts.kind,
+      // Truncated in SQL, not in JS: bodies run to 10k chars and a page of 30 would ship
+      // ~300KB just to render a two-line excerpt on the cards.
+      excerpt: sql<string>`left(${posts.body}, 200)`.as("excerpt"),
+      coverUrl: posts.coverUrl,
+      coverAuthorName: posts.coverAuthorName,
+      coverAuthorUrl: posts.coverAuthorUrl,
+      coverLicenseName: posts.coverLicenseName,
+      coverLicenseUrl: posts.coverLicenseUrl,
       commentCount: sql<number>`(
         SELECT count(*)::int FROM ${comments} WHERE ${comments.postId} = ${posts.id}
       )`.as("comment_count"),

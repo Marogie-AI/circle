@@ -11,6 +11,14 @@ export type SearchHit = {
   tags: string[];
   createdAt: Date;
   authorName: string;
+  /**
+   * Only the group search selects these — the command palette's cross-group query
+   * renders a plain list, not cards, so it leaves them undefined.
+   */
+  kind?: string;
+  url?: string | null;
+  ogImage?: string | null;
+  excerpt?: string | null;
 };
 
 /**
@@ -61,6 +69,10 @@ export async function searchGroupPosts({
                        'StartSel=<mark>,StopSel=</mark>,MaxFragments=1,MaxWords=24,MinWords=8')
                                 AS snippet,
            p.tags,
+           p.kind,
+           p.url,
+           p.og_image           AS "ogImage",
+           left(p.body, 200)    AS excerpt,
            p.created_at         AS "createdAt",
            u.name               AS "authorName"
     FROM posts p
