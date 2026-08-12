@@ -2,6 +2,7 @@
 
 import { useRouter, useSearchParams } from "next/navigation";
 import { CardsViewIcon, TableViewIcon } from "@/components/icons";
+import { feedUrl } from "@/lib/feed-url";
 import {
   DEFAULT_FEED_VIEW,
   FEED_VIEWS,
@@ -27,13 +28,18 @@ export function ViewToggle({ slug }: { slug: string }) {
   const active = parseFeedView(searchParams.get("view"));
 
   function apply(view: string) {
-    const next = new URLSearchParams(searchParams);
-    if (view === DEFAULT_FEED_VIEW) next.delete("view");
-    else next.set("view", view);
-    // Layout does not change the ordering, so the keyset cursor stays valid — unlike the
-    // filters, this deliberately keeps `before`.
-    const queryString = next.toString();
-    router.push(queryString ? `/groups/${slug}?${queryString}` : `/groups/${slug}`);
+    router.push(
+      feedUrl(
+        slug,
+        searchParams,
+        "view",
+        // The default writes no param, which keeps shared URLs clean.
+        view === DEFAULT_FEED_VIEW ? "" : view,
+        // Layout does not change the ordering, so the keyset cursor stays valid —
+        // unlike the filters, this deliberately keeps `before`.
+        { resetCursor: false },
+      ),
+    );
   }
 
   return (

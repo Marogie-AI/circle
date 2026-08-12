@@ -3,6 +3,7 @@
 import { useRouter, useSearchParams } from "next/navigation";
 import type { ReactNode } from "react";
 import { ChevronDownIcon } from "@/components/icons";
+import { feedUrl } from "@/lib/feed-url";
 import { KIND_LABELS, POST_KINDS, parsePostKind } from "@/lib/kind";
 
 /**
@@ -28,14 +29,9 @@ export function FeedFilters({
   const kind = parsePostKind(searchParams.get("kind")) ?? "";
 
   function apply(key: "author" | "sort" | "tag" | "kind", value: string) {
-    const next = new URLSearchParams(searchParams);
-    if (value) next.set(key, value);
-    else next.delete(key);
-    // Any filter change invalidates the keyset cursor — page 2 of the old
+    // resetCursor: any filter change invalidates the keyset cursor — page 2 of the old
     // ordering is meaningless under the new one.
-    next.delete("before");
-    const queryString = next.toString();
-    router.push(queryString ? `/groups/${slug}?${queryString}` : `/groups/${slug}`);
+    router.push(feedUrl(slug, searchParams, key, value, { resetCursor: true }));
   }
 
   return (
