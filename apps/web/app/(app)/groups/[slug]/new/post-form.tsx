@@ -7,7 +7,16 @@ import {
   updatePost,
   type PostActionState,
 } from "@/app/(app)/groups/[slug]/actions";
+import { ChevronDownIcon } from "@/components/icons";
 import { MentionTextarea } from "@/components/mention-textarea";
+import {
+  DEFAULT_POST_KIND,
+  detectKind,
+  KIND_LABELS,
+  POST_KINDS,
+  parsePostKind,
+  type PostKind,
+} from "@/lib/kind";
 import type { Mentionable } from "@/lib/mentions";
 
 // Lazy: keeps ~144 KB of markdown machinery out of the initial compose payload. It
@@ -37,6 +46,7 @@ export type PostDraft = {
   url: string | null;
   tags: string[];
   status: string;
+  kind: string;
 };
 
 /** Shared by the new-post and edit-post pages so validation and layout can't diverge. */
@@ -44,10 +54,13 @@ export function PostForm({
   slug,
   post,
   members,
+  initialKind = DEFAULT_POST_KIND,
 }: {
   slug: string;
   post?: PostDraft;
   members: Mentionable[];
+  /** Preselected category, from the sidebar quick-add menu's `?kind=`. */
+  initialKind?: PostKind;
 }) {
   const [state, formAction, pending] = useActionState(
     async (_previous: PostActionState, formData: FormData) =>
@@ -59,6 +72,14 @@ export function PostForm({
   const [body, setBody] = useState(post?.body ?? "");
   const [tab, setTab] = useState<"write" | "preview">("write");
   const isDraft = post?.status === "draft";
+
+  const [url, setUrl] = useState(post?.url ?? "");
+  const [kind, setKind] = useState<PostKind>(
+    // An existing post's stored kind wins over any ?kind= in the URL.
+    (post && parsePostKind(post.kind)) || initialKind,
+  );
+  // Once the author picks a category by hand, pasting another link must not overrule it.
+  const [kindTouched, setKindTouched] = useState(Boolean(post));
 
   const tabClass = (active: boolean) =>
     `rounded-md px-2.5 py-1 text-xs font-medium transition ${
@@ -137,22 +158,68 @@ export function PostForm({
         )}
       </div>
 
-      <div>
-        <label htmlFor="url" className="mb-1.5 block text-sm font-medium text-ink">
-          Link <span className="font-normal text-faint">(optional)</span>
-        </label>
-        <input
-          id="url"
-          name="url"
-          type="url"
-          disabled={pending}
-          defaultValue={post?.url ?? ""}
-          className={field}
-          placeholder="https://example.com"
-        />
-        <p className="mt-1.5 text-xs text-muted">
-          We'll fetch the title, description and image to build a preview card.
-        </p>
+      <div className="grid gap-5 sm:grid-cols-[1fr_10rem]">
+        <div>
+          <label htmlFor="url" className="mb-1.5 block text-sm font-medium text-ink">
+            Link <span className="font-normal text-faint">(optional)</span>
+          </label>
+          <input
+            id="url"
+            name="url"
+            type="url"
+            disabled={pending}
+            value={url}
+            onChange={(event) => {
+              setUrl(event.target.value);
+              // A guess, not a correction: only ever applied while the author has left
+              // the category alone.
+              if (!kindTouched) setKind(detectKind(event.target.value));
+            }}
+            className={field}
+            placeholder="https://example.com"
+          />
+          <p className="mt-1.5 text-xs text-muted">
+            We'll fetch the title, description and image to build a preview card.
+          </p>
+        </div>
+
+        <div>
+          <label htmlFor="kind" className="mb-1.5 block text-sm font-medium text-ink">
+            Category
+          </label>
+          {/* appearance-none plus our own chevron, matching components/feed-filters.tsx:
+              the native arrow reserves a wide gutter that cannot be narrowed. */}
+          <div className="relative">
+            <select
+              id="kind"
+              name="kind"
+              disabled={pending}
+              value={kind}
+              onChange={(event) => {
+                setKindTouched(true);
+                setKind(parsePostKind(event.target.value) ?? DEFAULT_POST_KIND);
+              }}
+              className={`${field} appearance-none pr-9`}
+            >
+              {POST_KINDS.map((option) => (
+                <option key={option} value={option}>
+                  {KIND_LABELS[option]}
+                </option>
+              ))}
+            </select>
+            <ChevronDownIcon
+              size={18}
+              className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-faint"
+            />
+          </div>
+          <p className="mt-1.5 text-xs text-muted">
+            {/* Only claim detection when a link actually drove it. Arriving from the
+                sidebar's ?kind=video with an empty Link field is a preset, not a guess. */}
+            {url.trim() && !kindTouched && detectKind(url) === kind
+              ? "Detected from the link."
+              : "How the group will browse it."}
+          </p>
+        </div>
       </div>
 
       <div>
