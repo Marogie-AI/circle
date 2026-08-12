@@ -1,21 +1,86 @@
 "use client";
 
 import { useOptimistic, useTransition } from "react";
-import { CopyIcon, ReactionIcon, TickIcon } from "@/components/icons";
-import { useState } from "react";
+import { CopyButton } from "@/components/copy-button";
+import { ReactionIcon } from "@/components/icons";
+
+type LikeState = { likes: number; liked: boolean };
 
 /**
- * The row under a post: like, comment count, copy link, then a summary line.
+ * One optimistic like, shared by the post bar and every comment.
  *
- * One like rather than six emoji. Optimistic for the same reason the old reaction bar
- * was — waiting on a round-trip plus revalidatePath before the count moved was the
- * most-felt lag in the app.
+ * A hook rather than two components with their own copies: the post bar needs the same
+ * state for BOTH its button and its summary line, so the state has to live above the
+ * button. Two independent useOptimistic blocks would let the summary lag behind the
+ * glyph until the server replied.
+ *
+ * Optimistic because waiting on a round-trip plus revalidatePath before the count moved
+ * was the most-felt lag in the app.
  */
+function useLike(likes: number, liked: boolean, onToggle: () => Promise<void>) {
+  const [, startTransition] = useTransition();
+  const [state, apply] = useOptimistic({ likes, liked }, (current: LikeState) => ({
+    liked: !current.liked,
+    likes: Math.max(0, current.likes + (current.liked ? -1 : 1)),
+  }));
+
+  return {
+    state,
+    toggle: () =>
+      startTransition(async () => {
+        apply(null);
+        await onToggle();
+      }),
+  };
+}
+
+/** The glyph and its count. Presentational — the caller owns the state. */
+function LikeGlyph({
+  state,
+  label,
+  size,
+  onClick,
+}: {
+  state: LikeState;
+  label: string;
+  size: "sm" | "lg";
+  onClick: () => void;
+}) {
+  const large = size === "lg";
+  return (
+    <button
+      type="button"
+      aria-pressed={state.liked}
+      aria-label={state.liked ? "Remove your like" : `Like this ${label}`}
+      onClick={onClick}
+      className={`flex items-center rounded-full transition hover:bg-hover hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inverse focus-visible:ring-offset-2 ${
+        large
+          ? `gap-2 px-2.5 py-1.5 text-sm ${state.liked ? "text-ink" : "text-muted"}`
+          : `gap-1.5 px-2 py-1 text-xs ${state.liked ? "text-ink" : "text-faint"}`
+      }`}
+    >
+      {/* Filled when liked. Stroke colour alone is nearly invisible in a zero-chroma
+          palette — the same trap the save button hit. */}
+      <ReactionIcon
+        size={large ? 19 : 15}
+        fill={state.liked ? "currentColor" : "none"}
+      />
+      {state.likes > 0 ? (
+        <span className={`tabular-nums ${large ? "text-sm" : "font-medium"}`}>
+          {state.likes}
+        </span>
+      ) : null}
+    </button>
+  );
+}
+
+/** The row under a post: like, copy link, then a summary of counts and the date. */
 export function PostActionBar({
   likes,
   liked,
   comments,
   dateLabel,
+  shareUrl,
   onToggleLike,
 }: {
   likes: number;
@@ -23,55 +88,32 @@ export function PostActionBar({
   comments: number;
   /** Rendered as-is; the server formats it so the markup matches on hydration. */
   dateLabel: string;
+  /** Root-relative path to this post; CopyButton resolves it against the origin. */
+  shareUrl: string;
   onToggleLike: () => Promise<void>;
 }) {
-  const [, startTransition] = useTransition();
-  const [state, apply] = useOptimistic(
-    { likes, liked },
-    (current) => ({
-      liked: !current.liked,
-      likes: Math.max(0, current.likes + (current.liked ? -1 : 1)),
-    }),
-  );
-
-  const action =
-    "flex items-center gap-2 rounded-full px-2.5 py-1.5 text-sm text-muted transition hover:bg-hover hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inverse focus-visible:ring-offset-2";
+  // One state, two readers: the glyph below and the summary line under it.
+  const { state, toggle } = useLike(likes, liked, onToggleLike);
 
   return (
     <div>
       <div className="flex items-center gap-1">
-        <button
-          type="button"
-          aria-pressed={state.liked}
-          aria-label={state.liked ? "Remove your like" : "Like this post"}
-          onClick={() =>
-            startTransition(async () => {
-              apply(null);
-              await onToggleLike();
-            })
-          }
-          className={`${action} ${state.liked ? "text-ink" : ""}`}
-        >
-          {/* Filled when liked. Stroke colour alone is nearly invisible in a
-              zero-chroma palette — the same trap the save button hit. */}
-          <ReactionIcon
-            size={19}
-            fill={state.liked ? "currentColor" : "none"}
-          />
-          {state.likes > 0 ? (
-            <span className="tabular-nums text-sm">{state.likes}</span>
-          ) : null}
-        </button>
+        <LikeGlyph state={state} label="post" size="lg" onClick={toggle} />
 
         {/* No comment button: the comments sit directly below this bar, and the summary
             line already carries the reply count. */}
-        <CopyLink className={action} />
+        <CopyButton
+          value={shareUrl}
+          variant="icon"
+          ariaLabel="Copy a link to this post"
+          className="flex items-center gap-2 rounded-full px-2.5 py-1.5 text-sm text-muted transition hover:bg-hover hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inverse focus-visible:ring-offset-2"
+        />
       </div>
 
       <div className="mt-2 flex items-center justify-between gap-4 border-y border-hairline py-2.5 text-sm text-muted">
         <p className="min-w-0 truncate">
-          {state.likes} {state.likes === 1 ? "Like" : "Likes"} ·{" "}
-          {comments} {comments === 1 ? "Reply" : "Replies"}
+          {state.likes} {state.likes === 1 ? "Like" : "Likes"} · {comments}{" "}
+          {comments === 1 ? "Reply" : "Replies"}
         </p>
         <p className="shrink-0">{dateLabel}</p>
       </div>
@@ -79,10 +121,7 @@ export function PostActionBar({
   );
 }
 
-/**
- * The bare like control, for comments. Same optimistic behaviour as the post bar without
- * the summary line — a comment does not need its own date rule.
- */
+/** The bare like control, for comments. Same behaviour, no summary line. */
 export function LikeButton({
   likes,
   liked,
@@ -95,65 +134,6 @@ export function LikeButton({
   label: string;
   onToggle: () => Promise<void>;
 }) {
-  const [, startTransition] = useTransition();
-  const [state, apply] = useOptimistic({ likes, liked }, (current) => ({
-    liked: !current.liked,
-    likes: Math.max(0, current.likes + (current.liked ? -1 : 1)),
-  }));
-
-  return (
-    <button
-      type="button"
-      aria-pressed={state.liked}
-      aria-label={state.liked ? `Remove your like` : `Like this ${label}`}
-      onClick={() =>
-        startTransition(async () => {
-          apply(null);
-          await onToggle();
-        })
-      }
-      className={`flex items-center gap-1.5 rounded-full px-2 py-1 text-xs transition hover:bg-hover hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inverse focus-visible:ring-offset-2 ${
-        state.liked ? "text-ink" : "text-faint"
-      }`}
-    >
-      <ReactionIcon size={15} fill={state.liked ? "currentColor" : "none"} />
-      {state.likes > 0 ? (
-        <span className="tabular-nums font-medium">{state.likes}</span>
-      ) : null}
-    </button>
-  );
-}
-
-/**
- * Copies the current post's URL. Reads location at click time rather than taking a prop,
- * so it cannot disagree with the address bar after a client navigation.
- */
-function CopyLink({ className }: { className: string }) {
-  const [copied, setCopied] = useState(false);
-
-  return (
-    <button
-      type="button"
-      aria-label="Copy a link to this post"
-      className={className}
-      onClick={async () => {
-        try {
-          await navigator.clipboard.writeText(window.location.href);
-          setCopied(true);
-          setTimeout(() => setCopied(false), 1800);
-        } catch {
-          // Clipboard can be blocked by permissions; say nothing rather than throw.
-        }
-      }}
-    >
-      {copied ? (
-        <TickIcon size={18} className="text-emerald-600" />
-      ) : (
-        <CopyIcon size={18} />
-      )}
-      <span className="sr-only" aria-live="polite">
-        {copied ? "Link copied" : ""}
-      </span>
-    </button>
-  );
+  const { state, toggle } = useLike(likes, liked, onToggle);
+  return <LikeGlyph state={state} label={label} size="sm" onClick={toggle} />;
 }

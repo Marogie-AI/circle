@@ -330,6 +330,7 @@ export default async function PostPage({ params }: PostPageProps) {
             liked={liked}
             comments={commentRows.length}
             dateLabel={dateTimeLabel(post.createdAt)}
+            shareUrl={`/groups/${slug}/p/${post.id}`}
             onToggleLike={async () => {
               "use server";
               await toggleReaction(slug, post.id, LIKE_EMOJI);
