@@ -11,13 +11,19 @@ export function Skeleton({ className = "" }: { className?: string }) {
   );
 }
 
-/** Page title block: eyebrow, heading, and the action buttons on the right. */
-export function PageHeaderSkeleton() {
+/**
+ * Page title block: eyebrow, heading, and the action buttons on the right.
+ *
+ * `eyebrow` is a prop because not every page has one — the group feed dropped its
+ * eyebrow, and reserving that line anyway would push the title down and then snap it
+ * back up, which is the jump this file exists to prevent.
+ */
+export function PageHeaderSkeleton({ eyebrow = true }: { eyebrow?: boolean }) {
   return (
     <div className="flex flex-col gap-4 pb-6 sm:flex-row sm:items-start sm:justify-between sm:gap-6">
       <div className="min-w-0">
-        <Skeleton className="h-3 w-24" />
-        <Skeleton className="mt-3 h-8 w-56" />
+        {eyebrow ? <Skeleton className="h-3 w-24" /> : null}
+        <Skeleton className={`h-8 w-56 ${eyebrow ? "mt-3" : ""}`} />
       </div>
       <div className="flex shrink-0 items-center gap-2">
         <Skeleton className="h-9 w-32" />

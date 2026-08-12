@@ -12,7 +12,8 @@ export function PageHeader({
   actions,
 }: {
   eyebrow?: string;
-  title: string;
+  /** A plain string for most pages; a node when the title is a breadcrumb. */
+  title: ReactNode;
   meta?: ReactNode;
   actions?: ReactNode;
 }) {
