@@ -3,6 +3,7 @@
 import { useRouter, useSearchParams } from "next/navigation";
 import type { ReactNode } from "react";
 import { ChevronDownIcon } from "@/components/icons";
+import { KIND_LABELS, POST_KINDS, parsePostKind } from "@/lib/kind";
 
 /**
  * Author and sort controls for the group feed. Client-side only so a <select> can
@@ -24,8 +25,9 @@ export function FeedFilters({
   const author = searchParams.get("author") ?? "";
   const sort = searchParams.get("sort") === "old" ? "old" : "new";
   const tag = searchParams.get("tag") ?? "";
+  const kind = parsePostKind(searchParams.get("kind")) ?? "";
 
-  function apply(key: "author" | "sort" | "tag", value: string) {
+  function apply(key: "author" | "sort" | "tag" | "kind", value: string) {
     const next = new URLSearchParams(searchParams);
     if (value) next.set(key, value);
     else next.delete(key);
@@ -39,6 +41,19 @@ export function FeedFilters({
   return (
     // The two selects are one cluster; the form's own gap separates them from search.
     <div className="flex flex-wrap items-center gap-2">
+      <Select
+        label="Filter by type"
+        value={kind}
+        onChange={(value) => apply("kind", value)}
+      >
+        <option value="">All types</option>
+        {POST_KINDS.map((option) => (
+          <option key={option} value={option}>
+            {KIND_LABELS[option]}
+          </option>
+        ))}
+      </Select>
+
       <Select
         label="Filter by tag"
         value={tag}
