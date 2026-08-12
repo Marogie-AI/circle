@@ -120,7 +120,16 @@ export async function publishDraft(slug: string, postId: string) {
   const { group, user } = await requireMember(slug);
 
   const [post] = await db
-    .select({ authorId: posts.authorId, status: posts.status })
+    .select({
+      authorId: posts.authorId,
+      status: posts.status,
+      // Needed to fetch the preview and cover below, which a draft deliberately skipped.
+      url: posts.url,
+      title: posts.title,
+      tags: posts.tags,
+      coverFetchedAt: posts.coverFetchedAt,
+      ogFetchedAt: posts.ogFetchedAt,
+    })
     .from(posts)
     .where(and(eq(posts.id, postId), eq(posts.groupId, group.id)))
     .limit(1);
@@ -135,6 +144,26 @@ export async function publishDraft(slug: string, postId: string) {
     .update(posts)
     .set({ status: "published", createdAt: new Date() })
     .where(eq(posts.id, postId));
+
+  // This is where a draft's outbound fetches finally happen. createPost and updatePost
+  // skip them while a post is unpublished, so publishing is the first moment the linked
+  // page or Openverse is allowed to learn anything about it. Guarded on *FetchedAt so
+  // re-publishing an already-fetched post does not fetch twice.
+  if (
+    !post.ogFetchedAt &&
+    !post.coverFetchedAt &&
+    (await allow(
+      `preview:${user.id}`,
+      PREVIEW_LIMIT.max,
+      PREVIEW_LIMIT.windowSeconds,
+    ))
+  ) {
+    if (post.url) {
+      attachPreview(postId, post.url, post.title, post.tags);
+    } else {
+      after(() => attachStockCover(postId, post.title, post.tags));
+    }
+  }
 
   after(async () => {
     const groupMembers = await db
@@ -309,17 +338,10 @@ async function attachStockCover(
   if (!stockImagesEnabled()) return;
 
   const query = stockKeywords(title, tags);
-  // coverFetchedAt is stamped even when there is nothing to send or nothing found, so a
-  // post with no usable keywords is not re-queried on every edit.
-  if (!query) {
-    await db
-      .update(posts)
-      .set({ coverFetchedAt: new Date() })
-      .where(eq(posts.id, postId));
-    return;
-  }
-
-  const image = await fetchStockImage(query);
+  // Stamped even when there is nothing to send or nothing found, so a post with no usable
+  // keywords is not re-queried on every publish. One UPDATE either way — the write is the
+  // point, not a side effect of a request that did not happen.
+  const image = query ? await fetchStockImage(query) : null;
   await db
     .update(posts)
     .set({
@@ -439,6 +461,16 @@ export async function createPost(
     })
     .returning({ id: posts.id });
 
+  // A draft is private to its author: no feed, no notifications, and — because this
+  // returns BEFORE the fetch block below — no outbound requests either. A draft is
+  // unpublished by definition, so neither the linked page nor Openverse should learn
+  // anything about it until the author decides to publish. publishDraft does the
+  // fetching instead.
+  if (isDraft) {
+    revalidatePath(`/groups/${slug}/drafts`);
+    redirect(`/groups/${slug}/drafts`);
+  }
+
   // The same limiter covers both outbound fetches: they are one budget of "requests this
   // member can make us send to other people's servers".
   if (
@@ -455,13 +487,6 @@ export async function createPost(
       // No link at all — a note. Nothing to preview, so go straight to a cover.
       after(() => attachStockCover(newPost.id, fields.title, fields.tags));
     }
-  }
-
-  // A draft is private to its author: no feed, no notifications. Send them to the
-  // drafts list to keep working.
-  if (isDraft) {
-    revalidatePath(`/groups/${slug}/drafts`);
-    redirect(`/groups/${slug}/drafts`);
   }
 
   // Notify every other member that a new post landed. One row per member — fine at the
@@ -551,12 +576,16 @@ export async function updatePost(
   // no row matched => not this group's post, or not yours to edit. Same 404 either way.
   if (!updated) notFound();
 
+  // Same rule as createPost: an unpublished draft causes no outbound request, however
+  // many times it is edited. current.status is the row's status before this update, and
+  // updatePost never changes it — publishing goes through publishDraft.
   if (
-    await allow(
+    current.status !== "draft" &&
+    (await allow(
       `preview:${user.id}`,
       PREVIEW_LIMIT.max,
       PREVIEW_LIMIT.windowSeconds,
-    )
+    ))
   ) {
     if (fields.url) {
       attachPreview(updated.id, fields.url, fields.title, fields.tags);
