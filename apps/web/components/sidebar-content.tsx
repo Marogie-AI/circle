@@ -5,12 +5,12 @@ import { usePathname } from "next/navigation";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { BellIcon } from "@hugeicons/core-free-icons";
 import type { UserGroup } from "@/lib/queries/groups";
+import { GroupNavItem } from "@/components/group-nav-item";
 import { UserMenu } from "@/components/user-menu";
 import { Wordmark } from "@/components/wordmark";
 import {
   BookmarkIcon,
   CollapseSidebarIcon,
-  GroupIcon,
   PlusIcon,
 } from "@/components/icons";
 
@@ -105,54 +105,17 @@ export function SidebarContent({
       <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-3">
         <nav aria-label="Groups">
           <ul className="space-y-0.5">
-            {groups.map((group) => {
-              const active = activeGroup?.id === group.id;
-              const count = unread[group.id] ?? 0;
-              return (
-                <li key={group.id}>
-                  <Link
-                    href={`/groups/${group.slug}`}
-                    prefetch
-                    onClick={onNavigate}
-                    aria-current={active ? "page" : undefined}
-                    className={`${link} ${
-                      active
-                        ? "bg-inverse font-medium text-inverse-ink"
-                        : "text-ink hover:bg-hover"
-                    }`}
-                  >
-                    <GroupIcon size={16} className="shrink-0 opacity-70" />
-                    {collapsed ? null : (
-                      <span className="min-w-0 flex-1 truncate">{group.name}</span>
-                    )}
-                    {collapsed && count > 0 ? (
-                      // No room for a number in a 68px rail; a dot still says
-                      // "something new in here".
-                      <span
-                        role="img"
-                        aria-label={`${count} unread`}
-                        className={`absolute right-2 top-2 h-1.5 w-1.5 rounded-full ${
-                          active ? "bg-surface" : "bg-inverse"
-                        }`}
-                      />
-                    ) : null}
-                    {!collapsed && count > 0 ? (
-                      // role="img" so the label wins over the visible text: the badge
-                      // truncates to "99+", the label carries the real count.
-                      <span
-                        role="img"
-                        aria-label={`${count} unread`}
-                        className={`shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-semibold tabular-nums ${
-                          active ? "bg-surface text-ink" : "bg-inverse text-inverse-ink"
-                        }`}
-                      >
-                        {count > 99 ? "99+" : count}
-                      </span>
-                    ) : null}
-                  </Link>
-                </li>
-              );
-            })}
+            {groups.map((group) => (
+              <GroupNavItem
+                key={group.id}
+                group={group}
+                active={activeGroup?.id === group.id}
+                count={unread[group.id] ?? 0}
+                collapsed={collapsed}
+                linkClass={link}
+                onNavigate={onNavigate}
+              />
+            ))}
           </ul>
         </nav>
 
