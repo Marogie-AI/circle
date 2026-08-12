@@ -111,12 +111,12 @@ export async function getFeedPage({
       kind: posts.kind,
       // Truncated in SQL, not in JS: bodies run to 10k chars and a page of 30 would ship
       // ~300KB just to render a two-line excerpt on the cards.
+      //
+      // Selected for every row even though only imageless posts in card view use it.
+      // Deliberate: 200 bytes a row is cheaper than making the query depend on the
+      // layout, which would fork this into two shapes and two cache entries.
       excerpt: sql<string>`left(${posts.body}, 200)`.as("excerpt"),
       coverUrl: posts.coverUrl,
-      coverAuthorName: posts.coverAuthorName,
-      coverAuthorUrl: posts.coverAuthorUrl,
-      coverLicenseName: posts.coverLicenseName,
-      coverLicenseUrl: posts.coverLicenseUrl,
       commentCount: sql<number>`(
         SELECT count(*)::int FROM ${comments} WHERE ${comments.postId} = ${posts.id}
       )`.as("comment_count"),
@@ -174,12 +174,12 @@ export async function getPinnedPosts(groupId: string, limit = 10) {
       kind: posts.kind,
       // Truncated in SQL, not in JS: bodies run to 10k chars and a page of 30 would ship
       // ~300KB just to render a two-line excerpt on the cards.
+      //
+      // Selected for every row even though only imageless posts in card view use it.
+      // Deliberate: 200 bytes a row is cheaper than making the query depend on the
+      // layout, which would fork this into two shapes and two cache entries.
       excerpt: sql<string>`left(${posts.body}, 200)`.as("excerpt"),
       coverUrl: posts.coverUrl,
-      coverAuthorName: posts.coverAuthorName,
-      coverAuthorUrl: posts.coverAuthorUrl,
-      coverLicenseName: posts.coverLicenseName,
-      coverLicenseUrl: posts.coverLicenseUrl,
       commentCount: sql<number>`(
         SELECT count(*)::int FROM ${comments} WHERE ${comments.postId} = ${posts.id}
       )`.as("comment_count"),

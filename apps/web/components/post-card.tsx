@@ -23,14 +23,12 @@ export type PostCardPost = {
   /** First 200 chars of the body, for the text cover fallback. */
   excerpt?: string | null;
   /**
-   * Stock cover and its credit. CC-BY/CC-BY-SA require the creator and the licence to be
-   * shown wherever the image is, so these travel together with the URL.
+   * Stock cover, used when the post has no image of its own. No creator or licence here:
+   * covers are fetched public-domain only, so nothing has to be displayed alongside them.
+   * The credit IS still stored on the row (see lib/stock-image.ts) — if that filter ever
+   * widens to CC-BY, both the query and this type need it back.
    */
   coverUrl?: string | null;
-  coverAuthorName?: string | null;
-  coverAuthorUrl?: string | null;
-  coverLicenseName?: string | null;
-  coverLicenseUrl?: string | null;
 };
 
 /**
@@ -123,9 +121,6 @@ export function PostCard({
         ) : null}
       </Link>
 
-      {/* No credit overlay: covers are fetched public-domain only (cc0/pdm), which carry
-          no attribution requirement. See lib/stock-image.ts — if that filter is ever
-          widened to CC-BY or CC-BY-SA, this credit has to come back. */}
       </div>
 
       <div className="flex min-w-0 flex-1 flex-col gap-2 px-4 pb-3 pt-3">
