@@ -1,4 +1,4 @@
-import { and, asc, count, eq } from "drizzle-orm";
+import { and, asc, count, countDistinct, eq } from "drizzle-orm";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import ReactMarkdown from "react-markdown";
@@ -24,7 +24,7 @@ import {
 } from "@/db/schema";
 import { buttonStyles } from "@/components/page-header";
 import { BackIcon, PlusIcon } from "@/components/icons";
-import { ReactionBar } from "@/components/reaction-bar";
+import { LikeButton, PostActionBar } from "@/components/post-action-bar";
 import { MentionText } from "@/components/mention-text";
 import { MentionTextarea } from "@/components/mention-textarea";
 import { LinkCard } from "@/components/link-card";
@@ -35,10 +35,10 @@ import { listGroupCollections } from "@/lib/queries/group-collections";
 import { SaveButton } from "@/components/save-button";
 import { PostActionsMenu } from "@/components/post-actions-menu";
 import { SubmitButton } from "@/components/submit-button";
-import { Avatar, AvatarStack } from "@/components/avatar";
+import { Avatar } from "@/components/avatar";
 import { requireMember } from "@/lib/guard";
 import { isSaved } from "@/lib/queries/saved";
-import { isUuid } from "@/lib/post";
+import { isUuid, LIKE_EMOJI } from "@/lib/post";
 
 type PostPageProps = {
   params: Promise<{ slug: string; id: string }>;
@@ -50,6 +50,23 @@ function fullDate(date: Date) {
     month: "long",
     day: "numeric",
   });
+}
+
+/**
+ * "Aug 12 at 2:33 PM" for the summary line. Formatted on the server and passed down as a
+ * string so the client bar cannot render a different locale or timezone than the markup
+ * it hydrates.
+ */
+function dateTimeLabel(date: Date) {
+  const day = date.toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+  });
+  const time = date.toLocaleTimeString(undefined, {
+    hour: "numeric",
+    minute: "2-digit",
+  });
+  return `${day} at ${time}`;
 }
 
 export default async function PostPage({ params }: PostPageProps) {
@@ -89,7 +106,6 @@ export default async function PostPage({ params }: PostPageProps) {
     commentRows,
     reactionCounts,
     currentUserReactions,
-    reactorRows,
     saved,
     commentReactionCounts,
     myCommentReactions,
@@ -108,11 +124,13 @@ export default async function PostPage({ params }: PostPageProps) {
       .innerJoin(users, eq(users.id, comments.authorId))
       .where(eq(comments.postId, post.id))
       .orderBy(asc(comments.createdAt)),
+    // countDistinct on user_id, NOT a sum of per-emoji counts: one member can still hold
+    // more than one legacy emoji row on the same post, and summing would count them
+    // twice. A like is a person, not a row.
     db
-      .select({ emoji: reactions.emoji, count: count() })
+      .select({ users: countDistinct(reactions.userId) })
       .from(reactions)
-      .where(eq(reactions.postId, post.id))
-      .groupBy(reactions.emoji),
+      .where(eq(reactions.postId, post.id)),
     db
       .select({ emoji: reactions.emoji })
       .from(reactions)
@@ -122,15 +140,6 @@ export default async function PostPage({ params }: PostPageProps) {
           eq(reactions.userId, user.id),
         ),
       ),
-    // Who reacted, for the avatar stack. Bounded — the grouped count query above stays
-    // authoritative for totals, so this never has to load every reactor on a hot post.
-    db
-      .select({ name: users.name })
-      .from(reactions)
-      .innerJoin(users, eq(users.id, reactions.userId))
-      .where(eq(reactions.postId, post.id))
-      .orderBy(asc(reactions.createdAt))
-      .limit(24),
     // In the same batch: it only needs post.id and user.id, both already known, so
     // awaiting it separately was one more sequential round-trip for nothing.
     isSaved(user.id, post.id),
@@ -162,8 +171,9 @@ export default async function PostPage({ params }: PostPageProps) {
     listGroupMembers(group.id),
     listGroupCollections(group.id),
   ]);
-  const counts = new Map(reactionCounts.map((row) => [row.emoji, row.count]));
-  const selected = new Set(currentUserReactions.map((row) => row.emoji));
+  // One like per member, counted across every emoji ever stored — see LIKE_EMOJI.
+  const likeCount = reactionCounts[0]?.users ?? 0;
+  const liked = currentUserReactions.length > 0;
 
   // Per-comment reaction lookups: commentId -> { emoji: count } and commentId -> [mine].
   const commentCounts = new Map<string, Record<string, number>>();
@@ -179,18 +189,15 @@ export default async function PostPage({ params }: PostPageProps) {
       row.emoji,
     ]);
   }
-  const reactorNames = [...new Set(reactorRows.map((row) => row.name))];
   // presentational only — the actions re-check this in their own WHERE clause
   const canManagePost = role === "owner" || post.authorId === user.id;
-  const totalReactions = reactionCounts.reduce((sum, row) => sum + row.count, 0);
-  const contentLayout =
-    post.status === "published"
-      ? "grid min-w-0 gap-12 py-10 lg:grid-cols-[minmax(0,1fr)_300px]"
-      : "min-w-0 py-10";
 
   return (
-    <main className="min-h-full w-full min-w-0 px-6 pb-10 pt-9 sm:px-10 sm:pb-12">
-      <header className="flex items-center justify-between gap-4 border-b border-line pb-5">
+    // Full width, matching the group feed's own padding. Reactions and comments follow
+    // the article in the same column rather than riding a sidebar: the body is the thing
+    // being read, and a 300px rail put the comment box level with the title.
+    <main className="min-h-full w-full min-w-0 px-6 pb-10 pt-9 sm:px-10 sm:pb-16">
+      <header className="flex flex-wrap items-center justify-between gap-x-4 gap-y-3 border-b border-line pb-5">
         <Link href={`/groups/${slug}`} className="group inline-flex min-w-0 items-center gap-1.5 text-sm font-medium text-muted transition hover:text-ink">
           <BackIcon size={16} className="transition group-hover:-translate-x-0.5" />
           <span className="truncate">{group.name}</span>
@@ -261,10 +268,7 @@ export default async function PostPage({ params }: PostPageProps) {
         </div>
       ) : null}
 
-      {/* P2: body keeps a reading measure on the left, reactions + comments ride a
-          sticky rail on the right. Stacks to one column below lg. */}
-      <div className={contentLayout}>
-      <article className="min-w-0 max-w-[68ch]">
+      <article className="min-w-0 pt-10">
         <h1 className="text-[2rem] font-semibold leading-[1.15] tracking-tight text-ink">{post.title}</h1>
         <div className="mt-4 flex items-center gap-2 text-sm text-muted">
           <Avatar name={post.authorName} size="sm" />
@@ -319,30 +323,23 @@ export default async function PostPage({ params }: PostPageProps) {
       </article>
 
       {post.status === "published" ? (
-      <aside className="min-w-0 lg:sticky lg:top-6 lg:h-fit">
-        <section aria-label="Reactions" className="border-t border-hairline pt-4">
-          <ReactionBar
-            counts={Object.fromEntries(counts)}
-            mine={[...selected]}
-            onToggle={async (emoji: string) => {
+      <>
+        <section aria-label="Post actions" className="mt-10 border-t border-line pt-4">
+          <PostActionBar
+            likes={likeCount}
+            liked={liked}
+            comments={commentRows.length}
+            dateLabel={dateTimeLabel(post.createdAt)}
+            onToggleLike={async () => {
               "use server";
-              await toggleReaction(slug, post.id, emoji);
+              await toggleReaction(slug, post.id, LIKE_EMOJI);
             }}
           />
-
-          {reactorNames.length > 0 ? (
-            <div className="mt-3 flex items-center gap-2 border-t border-hairline pt-3">
-              <AvatarStack names={reactorNames} />
-              <p className="min-w-0 truncate text-xs text-muted">
-                {totalReactions === 1 ? "1 reaction" : `${totalReactions} reactions`}
-              </p>
-            </div>
-          ) : null}
         </section>
 
-      <section aria-labelledby="comments-heading" className="mt-5 pb-16">
-        <h2 id="comments-heading" className="text-sm font-semibold tracking-tight text-ink">Comments <span className="font-normal text-faint">{commentRows.length}</span></h2>
-        <form action={addComment.bind(null, slug, post.id)} className="mt-3">
+      <section aria-labelledby="comments-heading" className="mt-10 border-t border-line pt-8">
+        <h2 id="comments-heading" className="text-base font-semibold tracking-tight text-ink">Comments <span className="font-normal text-faint">{commentRows.length}</span></h2>
+        <form action={addComment.bind(null, slug, post.id)} className="mt-4">
           <label htmlFor="comment" className="sr-only">Add a comment</label>
           <MentionTextarea
             id="comment"
@@ -380,13 +377,22 @@ export default async function PostPage({ params }: PostPageProps) {
                     members={groupMembers}
                     className="mt-1 whitespace-pre-wrap break-words text-sm leading-6 text-muted"
                   />
-                  <div className="mt-2">
-                    <ReactionBar
-                      counts={commentCounts.get(comment.id) ?? {}}
-                      mine={commentMine.get(comment.id) ?? []}
-                      onToggle={async (emoji: string) => {
+                  <div className="mt-1.5">
+                    <LikeButton
+                      likes={Object.values(commentCounts.get(comment.id) ?? {}).reduce(
+                        (sum, n) => sum + n,
+                        0,
+                      )}
+                      liked={(commentMine.get(comment.id) ?? []).length > 0}
+                      label="comment"
+                      onToggle={async () => {
                         "use server";
-                        await toggleCommentReaction(slug, post.id, comment.id, emoji);
+                        await toggleCommentReaction(
+                          slug,
+                          post.id,
+                          comment.id,
+                          LIKE_EMOJI,
+                        );
                       }}
                     />
                   </div>
@@ -408,9 +414,8 @@ export default async function PostPage({ params }: PostPageProps) {
         {/* deliberately no empty-state card: the compose box above already reads
             "Add a comment…", so a second "no comments yet" panel is redundant noise */}
       </section>
-      </aside>
+      </>
       ) : null}
-      </div>
     </main>
   );
 }
