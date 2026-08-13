@@ -1,10 +1,22 @@
-export const REACTION_EMOJIS = ["👍", "🔥", "❤️", "😂", "🤯", "👀"] as const;
+/**
+ * There is one reaction now: a like. It is still stored in the emoji column rather than
+ * as a boolean, so the six older reactions (👍🔥😂🤯👀) remain valid rows instead of
+ * needing a lossy migration that would forget which one each person picked.
+ *
+ * A "like" therefore means *this member has any reaction row on this post*. That keeps
+ * historical counts honest — someone who once hit 🔥 still reads as having liked it, and
+ * cannot like it a second time.
+ */
+export const LIKE_EMOJI = "❤️";
 
-/** Accessible names for each stored reaction key. Plain data — safe in server components. */
+/** The write allowlist. Only a like can be created from now on. */
+export const REACTION_EMOJIS = [LIKE_EMOJI] as const;
+
+/** Accessible names for each stored reaction key, including the retired ones. */
 export const REACTION_LABELS: Record<string, string> = {
+  "❤️": "Like",
   "👍": "Agree",
   "🔥": "Fire",
-  "❤️": "Love",
   "😂": "Funny",
   "🤯": "Mind blown",
   "👀": "Watching",

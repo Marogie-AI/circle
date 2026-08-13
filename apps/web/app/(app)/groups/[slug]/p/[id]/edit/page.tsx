@@ -25,6 +25,7 @@ export default async function EditPostPage({ params }: EditPageProps) {
       tags: posts.tags,
       authorId: posts.authorId,
       status: posts.status,
+      kind: posts.kind,
     })
     .from(posts)
     .where(and(eq(posts.id, id), eq(posts.groupId, group.id)))

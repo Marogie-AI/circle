@@ -1,0 +1,2 @@
+ALTER TABLE "posts" ADD COLUMN "kind" text DEFAULT 'note' NOT NULL;--> statement-breakpoint
+CREATE INDEX "posts_group_kind_feed_idx" ON "posts" USING btree ("group_id","kind","created_at" desc,"id" desc) WHERE "posts"."status" = 'published';

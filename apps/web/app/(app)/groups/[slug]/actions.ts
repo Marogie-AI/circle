@@ -17,11 +17,17 @@ import {
 } from "@/db/schema";
 import { requireMember } from "@/lib/guard";
 import { safeFetchPreview } from "@/lib/link-preview";
+import { DEFAULT_POST_KIND, parsePostKind, type PostKind } from "@/lib/kind";
 import { extractMentionIds } from "@/lib/mentions";
 import { notify } from "@/lib/notify";
 import { isUuid, REACTION_EMOJIS } from "@/lib/post";
 import { listGroupMembers } from "@/lib/queries/groups";
 import { allow } from "@/lib/rate-limit";
+import {
+  fetchStockImage,
+  stockImagesEnabled,
+  stockKeywords,
+} from "@/lib/stock-image";
 
 export type PostActionState = { error: string | null };
 
@@ -114,7 +120,16 @@ export async function publishDraft(slug: string, postId: string) {
   const { group, user } = await requireMember(slug);
 
   const [post] = await db
-    .select({ authorId: posts.authorId, status: posts.status })
+    .select({
+      authorId: posts.authorId,
+      status: posts.status,
+      // Needed to fetch the preview and cover below, which a draft deliberately skipped.
+      url: posts.url,
+      title: posts.title,
+      tags: posts.tags,
+      coverFetchedAt: posts.coverFetchedAt,
+      ogFetchedAt: posts.ogFetchedAt,
+    })
     .from(posts)
     .where(and(eq(posts.id, postId), eq(posts.groupId, group.id)))
     .limit(1);
@@ -129,6 +144,26 @@ export async function publishDraft(slug: string, postId: string) {
     .update(posts)
     .set({ status: "published", createdAt: new Date() })
     .where(eq(posts.id, postId));
+
+  // This is where a draft's outbound fetches finally happen. createPost and updatePost
+  // skip them while a post is unpublished, so publishing is the first moment the linked
+  // page or Openverse is allowed to learn anything about it. Guarded on *FetchedAt so
+  // re-publishing an already-fetched post does not fetch twice.
+  if (
+    !post.ogFetchedAt &&
+    !post.coverFetchedAt &&
+    (await allow(
+      `preview:${user.id}`,
+      PREVIEW_LIMIT.max,
+      PREVIEW_LIMIT.windowSeconds,
+    ))
+  ) {
+    if (post.url) {
+      attachPreview(postId, post.url, post.title, post.tags);
+    } else {
+      after(() => attachStockCover(postId, post.title, post.tags));
+    }
+  }
 
   after(async () => {
     const groupMembers = await db
@@ -170,7 +205,14 @@ async function publishedPostInGroup(postId: string, groupId: string) {
 }
 
 type PostFields =
-  | { ok: true; title: string; body: string; url: string | null; tags: string[] }
+  | {
+      ok: true;
+      title: string;
+      body: string;
+      url: string | null;
+      tags: string[];
+      kind: PostKind;
+    }
   | { ok: false; error: string };
 
 /**
@@ -208,6 +250,9 @@ function readPostFields(formData: FormData): PostFields {
     body,
     url,
     tags: normalizeTags(String(formData.get("tags") ?? "")),
+    // An unknown kind is not worth an error message — it can only come from a tampered
+    // form, never from the select. Fall back rather than block the post.
+    kind: parsePostKind(formData.get("kind")) ?? DEFAULT_POST_KIND,
   };
 }
 
@@ -240,6 +285,7 @@ function readDraftFields(formData: FormData): PostFields {
     body,
     url,
     tags: normalizeTags(String(formData.get("tags") ?? "")),
+    kind: parsePostKind(formData.get("kind")) ?? DEFAULT_POST_KIND,
   };
 }
 
@@ -251,7 +297,12 @@ function readDraftFields(formData: FormData): PostFields {
  * site. The row is already written, so the preview is pure decoration that lands a
  * moment later. safeFetchPreview enforces the SSRF guards and returns null on failure.
  */
-function attachPreview(postId: string, url: string | null) {
+function attachPreview(
+  postId: string,
+  url: string | null,
+  title: string,
+  tags: string[],
+) {
   if (!url) return;
   after(async () => {
     const preview = await safeFetchPreview(url);
@@ -265,7 +316,43 @@ function attachPreview(postId: string, url: string | null) {
         ogFetchedAt: new Date(),
       })
       .where(eq(posts.id, postId));
+
+    // The linked page had no artwork of its own — fall back to a stock cover.
+    if (!preview?.image) await attachStockCover(postId, title, tags);
   });
+}
+
+/**
+ * Fetch a stock cover and store it with its credit. Runs in `after()` like the preview:
+ * an outbound request must never be on the path of saving a post.
+ *
+ * PRIVACY: this sends keywords derived from the post to Openverse. `stockKeywords` decides
+ * what those are — read it before changing anything here. Set STOCK_IMAGES_DISABLED=1 to
+ * stop all outbound cover requests.
+ */
+async function attachStockCover(
+  postId: string,
+  title: string,
+  tags: string[],
+) {
+  if (!stockImagesEnabled()) return;
+
+  const query = stockKeywords(title, tags);
+  // Stamped even when there is nothing to send or nothing found, so a post with no usable
+  // keywords is not re-queried on every publish. One UPDATE either way — the write is the
+  // point, not a side effect of a request that did not happen.
+  const image = query ? await fetchStockImage(query) : null;
+  await db
+    .update(posts)
+    .set({
+      coverUrl: image?.url ?? null,
+      coverAuthorName: image?.authorName ?? null,
+      coverAuthorUrl: image?.authorUrl ?? null,
+      coverLicenseName: image?.licenseName ?? null,
+      coverLicenseUrl: image?.licenseUrl ?? null,
+      coverFetchedAt: new Date(),
+    })
+    .where(eq(posts.id, postId));
 }
 
 /**
@@ -369,26 +456,37 @@ export async function createPost(
       body: fields.body,
       url: fields.url,
       tags: fields.tags,
+      kind: fields.kind,
       status: isDraft ? "draft" : "published",
     })
     .returning({ id: posts.id });
 
-  if (
-    fields.url &&
-    (await allow(
-      `preview:${user.id}`,
-      PREVIEW_LIMIT.max,
-      PREVIEW_LIMIT.windowSeconds,
-    ))
-  ) {
-    attachPreview(newPost.id, fields.url);
-  }
-
-  // A draft is private to its author: no feed, no notifications. Send them to the
-  // drafts list to keep working.
+  // A draft is private to its author: no feed, no notifications, and — because this
+  // returns BEFORE the fetch block below — no outbound requests either. A draft is
+  // unpublished by definition, so neither the linked page nor Openverse should learn
+  // anything about it until the author decides to publish. publishDraft does the
+  // fetching instead.
   if (isDraft) {
     revalidatePath(`/groups/${slug}/drafts`);
     redirect(`/groups/${slug}/drafts`);
+  }
+
+  // The same limiter covers both outbound fetches: they are one budget of "requests this
+  // member can make us send to other people's servers".
+  if (
+    await allow(
+      `preview:${user.id}`,
+      PREVIEW_LIMIT.max,
+      PREVIEW_LIMIT.windowSeconds,
+    )
+  ) {
+    if (fields.url) {
+      // attachPreview falls through to a stock cover if the page has no image.
+      attachPreview(newPost.id, fields.url, fields.title, fields.tags);
+    } else {
+      // No link at all — a note. Nothing to preview, so go straight to a cover.
+      after(() => attachStockCover(newPost.id, fields.title, fields.tags));
+    }
   }
 
   // Notify every other member that a new post landed. One row per member — fine at the
@@ -455,6 +553,7 @@ export async function updatePost(
       body: fields.body,
       url: fields.url,
       tags: fields.tags,
+      kind: fields.kind,
       // Never show metadata from the old URL while a new preview is pending or
       // deliberately skipped by the outbound-fetch limiter.
       ogTitle: null,
@@ -477,15 +576,22 @@ export async function updatePost(
   // no row matched => not this group's post, or not yours to edit. Same 404 either way.
   if (!updated) notFound();
 
+  // Same rule as createPost: an unpublished draft causes no outbound request, however
+  // many times it is edited. current.status is the row's status before this update, and
+  // updatePost never changes it — publishing goes through publishDraft.
   if (
-    fields.url &&
+    current.status !== "draft" &&
     (await allow(
       `preview:${user.id}`,
       PREVIEW_LIMIT.max,
       PREVIEW_LIMIT.windowSeconds,
     ))
   ) {
-    attachPreview(updated.id, fields.url);
+    if (fields.url) {
+      attachPreview(updated.id, fields.url, fields.title, fields.tags);
+    } else {
+      after(() => attachStockCover(updated.id, fields.title, fields.tags));
+    }
   }
   revalidatePath(`/groups/${slug}/p/${postId}`);
   redirect(`/groups/${slug}/p/${postId}`);
@@ -658,28 +764,20 @@ export async function toggleReaction(
     .limit(1);
   if (!post) notFound();
 
+  // Matched on (post, user) WITHOUT the emoji: a like means "this member has reacted",
+  // whatever glyph they used. So an old 🔥 row reads as already liked and cannot be
+  // liked again, and un-liking clears whatever they had rather than leaving a stray
+  // legacy row behind that would keep them counted. See LIKE_EMOJI in lib/post.ts.
   const existing = await db
     .select({ emoji: reactions.emoji })
     .from(reactions)
-    .where(
-      and(
-        eq(reactions.postId, postId),
-        eq(reactions.userId, user.id),
-        eq(reactions.emoji, emoji),
-      ),
-    )
+    .where(and(eq(reactions.postId, postId), eq(reactions.userId, user.id)))
     .limit(1);
 
   if (existing.length) {
     await db
       .delete(reactions)
-      .where(
-        and(
-          eq(reactions.postId, postId),
-          eq(reactions.userId, user.id),
-          eq(reactions.emoji, emoji),
-        ),
-      );
+      .where(and(eq(reactions.postId, postId), eq(reactions.userId, user.id)));
   } else {
     await db
       .insert(reactions)
@@ -723,6 +821,7 @@ export async function toggleCommentReaction(
     .limit(1);
   if (!comment) notFound();
 
+  // Same (comment, user) matching as toggleReaction — one like per member per comment.
   const existing = await db
     .select({ emoji: commentReactions.emoji })
     .from(commentReactions)
@@ -730,7 +829,6 @@ export async function toggleCommentReaction(
       and(
         eq(commentReactions.commentId, commentId),
         eq(commentReactions.userId, user.id),
-        eq(commentReactions.emoji, emoji),
       ),
     )
     .limit(1);
@@ -742,7 +840,6 @@ export async function toggleCommentReaction(
         and(
           eq(commentReactions.commentId, commentId),
           eq(commentReactions.userId, user.id),
-          eq(commentReactions.emoji, emoji),
         ),
       );
   } else {

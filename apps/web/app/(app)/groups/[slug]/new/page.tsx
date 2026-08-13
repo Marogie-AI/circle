@@ -1,14 +1,28 @@
 import Link from "next/link";
 import { PostForm } from "@/app/(app)/groups/[slug]/new/post-form";
 import { requireMember } from "@/lib/guard";
+import { DEFAULT_POST_KIND, parsePostKind } from "@/lib/kind";
 import { listGroupMembers } from "@/lib/queries/groups";
 
-type NewPostPageProps = { params: Promise<{ slug: string }> };
+type NewPostPageProps = {
+  params: Promise<{ slug: string }>;
+  searchParams: Promise<{ kind?: string | string[] }>;
+};
 
-export default async function NewPostPage({ params }: NewPostPageProps) {
+export default async function NewPostPage({
+  params,
+  searchParams,
+}: NewPostPageProps) {
   const { slug } = await params;
   const { group } = await requireMember(slug);
   const members = await listGroupMembers(group.id);
+
+  // The sidebar quick-add menu links here with ?kind=. An unrecognised value just falls
+  // back to the default rather than 404ing — all it does is preselect a dropdown.
+  const requestedKind = (await searchParams).kind;
+  const initialKind =
+    parsePostKind(Array.isArray(requestedKind) ? requestedKind[0] : requestedKind) ??
+    DEFAULT_POST_KIND;
 
   return (
     // pt-9 puts the back link's optical centre on the sidebar wordmark's:
@@ -21,7 +35,7 @@ export default async function NewPostPage({ params }: NewPostPageProps) {
         <p className="text-sm font-medium text-muted">{group.name}</p>
         <h1 className="mt-1 text-3xl font-semibold tracking-tight text-ink">New post</h1>
         <p className="mt-2 text-sm text-muted">Share something useful with your circle.</p>
-        <PostForm slug={slug} members={members} />
+        <PostForm slug={slug} members={members} initialKind={initialKind} />
       </section>
     </main>
   );

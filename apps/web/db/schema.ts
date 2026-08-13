@@ -80,6 +80,10 @@ export const posts = pgTable(
     tags: text("tags").array().notNull().default([]),
     // 'published' | 'draft'. Drafts are visible only to their author, never in the feed.
     status: text("status").notNull().default("published"),
+    // What kind of find this is: 'video' | 'article' | 'tool' | 'note'. Validated in the
+    // app (lib/kind.ts), not by a check constraint — a new category should be a code
+    // change, not a migration. Pre-existing rows default to 'note'.
+    kind: text("kind").notNull().default("note"),
     // Owner-pinned posts sort to the top of the feed. Null = not pinned.
     pinnedAt: timestamp("pinned_at"),
     // Open Graph metadata for the link card. Nullable: a preview is best-effort and
@@ -89,6 +93,18 @@ export const posts = pgTable(
     ogImage: text("og_image"),
     ogSite: text("og_site"),
     ogFetchedAt: timestamp("og_fetched_at"),
+    // Stock cover for posts with no image of their own. Separate from the og* columns
+    // because this is not the linked page's own artwork — it is a stand-in we fetched
+    // from Openverse. The creator and licence are stored WITH the URL because CC-BY and
+    // CC-BY-SA require both to be shown wherever the image is; a cover we cannot credit
+    // is one we may not display. coverFetchedAt records that we tried, so a post with no
+    // match is not re-queried forever. See lib/stock-image.ts.
+    coverUrl: text("cover_url"),
+    coverAuthorName: text("cover_author_name"),
+    coverAuthorUrl: text("cover_author_url"),
+    coverLicenseName: text("cover_license_name"),
+    coverLicenseUrl: text("cover_license_url"),
+    coverFetchedAt: timestamp("cover_fetched_at"),
     createdAt: timestamp("created_at").notNull().defaultNow(),
     updatedAt: timestamp("updated_at").notNull().defaultNow(),
   },
@@ -122,6 +138,12 @@ export const posts = pgTable(
     // Profile history is global to an author, not restricted to a particular group.
     index("posts_author_published_created_idx")
       .on(table.authorId, desc(table.createdAt))
+      .where(sql`${table.status} = 'published'`),
+    // The kind filter sorts by the same keys as the feed, so it needs its own leading
+    // column for the same reason the author filter does — otherwise filtering a busy
+    // group to one category scans most of the group.
+    index("posts_group_kind_feed_idx")
+      .on(table.groupId, table.kind, desc(table.createdAt), desc(table.id))
       .where(sql`${table.status} = 'published'`),
     // Pinned posts use a different sort order from the chronological feed.
     index("posts_group_pinned_idx")

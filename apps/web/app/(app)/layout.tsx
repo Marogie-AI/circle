@@ -29,7 +29,10 @@ export default async function AppLayout({
     // h-screen + overflow-hidden here means the DOCUMENT never scrolls, so there is
     // no page-level scrollbar and no body rubber-banding. The content column below
     // scrolls instead — clipping it outright would hide every post past the fold.
-    <div className="flex h-screen w-full overflow-hidden bg-canvas">
+    //
+    // Deliberately NO bg-canvas: this shell covers the whole viewport, so painting it
+    // would hide the gradient on <body> (see globals.css) everywhere inside the app.
+    <div className="flex h-screen w-full overflow-hidden">
       {/* The sidebar's queries used to be awaited by this layout, which held EVERY
           page behind them — one slow query blanked the whole app. Behind Suspense the
           chrome streams in beside the page instead of ahead of it. */}

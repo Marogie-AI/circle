@@ -28,6 +28,8 @@ export default function RootLayout({
           {THEME_SCRIPT}
         </Script>
       </head>
+      {/* bg-canvas is the flat base under the gradient globals.css paints on body, and
+          the fallback if that background-image ever fails to apply. */}
       <body className="min-h-screen bg-canvas text-ink antialiased">
         {children}
       </body>

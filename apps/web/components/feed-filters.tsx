@@ -3,6 +3,8 @@
 import { useRouter, useSearchParams } from "next/navigation";
 import type { ReactNode } from "react";
 import { ChevronDownIcon } from "@/components/icons";
+import { feedUrl } from "@/lib/feed-url";
+import { KIND_LABELS, POST_KINDS, parsePostKind } from "@/lib/kind";
 
 /**
  * Author and sort controls for the group feed. Client-side only so a <select> can
@@ -24,21 +26,30 @@ export function FeedFilters({
   const author = searchParams.get("author") ?? "";
   const sort = searchParams.get("sort") === "old" ? "old" : "new";
   const tag = searchParams.get("tag") ?? "";
+  const kind = parsePostKind(searchParams.get("kind")) ?? "";
 
-  function apply(key: "author" | "sort" | "tag", value: string) {
-    const next = new URLSearchParams(searchParams);
-    if (value) next.set(key, value);
-    else next.delete(key);
-    // Any filter change invalidates the keyset cursor — page 2 of the old
+  function apply(key: "author" | "sort" | "tag" | "kind", value: string) {
+    // resetCursor: any filter change invalidates the keyset cursor — page 2 of the old
     // ordering is meaningless under the new one.
-    next.delete("before");
-    const queryString = next.toString();
-    router.push(queryString ? `/groups/${slug}?${queryString}` : `/groups/${slug}`);
+    router.push(feedUrl(slug, searchParams, key, value, { resetCursor: true }));
   }
 
   return (
     // The two selects are one cluster; the form's own gap separates them from search.
     <div className="flex flex-wrap items-center gap-2">
+      <Select
+        label="Filter by type"
+        value={kind}
+        onChange={(value) => apply("kind", value)}
+      >
+        <option value="">All types</option>
+        {POST_KINDS.map((option) => (
+          <option key={option} value={option}>
+            {KIND_LABELS[option]}
+          </option>
+        ))}
+      </Select>
+
       <Select
         label="Filter by tag"
         value={tag}
