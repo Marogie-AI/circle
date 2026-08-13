@@ -1,4 +1,6 @@
 import { cache } from "react";
+import { cached } from "@/lib/cache";
+import { keys } from "@/lib/cache-keys";
 import { listGroupsForUser } from "@/lib/queries/groups";
 import { unreadNotificationCount } from "@/lib/queries/notifications";
 import { unreadCounts } from "@/lib/queries/reads";
@@ -12,11 +14,13 @@ import { unreadCounts } from "@/lib/queries/reads";
  * the feed's filter bar, which fetches its own, so the chrome is down to two queries.
  */
 export const getChromeData = cache(async function getChromeData(userId: string) {
-  const [groups, unread, unreadNotifications] = await Promise.all([
-    listGroupsForUser(userId),
-    unreadCounts(userId),
-    unreadNotificationCount(userId),
-  ]);
+  return cached(keys.userChrome(userId), 30, async () => {
+    const [groups, unread, unreadNotifications] = await Promise.all([
+      listGroupsForUser(userId),
+      unreadCounts(userId),
+      unreadNotificationCount(userId),
+    ]);
 
-  return { groups, unread: Object.fromEntries(unread), unreadNotifications };
+    return { groups, unread: Object.fromEntries(unread), unreadNotifications };
+  });
 });

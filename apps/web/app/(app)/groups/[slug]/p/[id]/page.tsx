@@ -1,36 +1,26 @@
-import { and, asc, count, countDistinct, eq } from "drizzle-orm";
+import { and, count, countDistinct, eq } from "drizzle-orm";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
-  addComment,
-  deleteComment,
   deletePost,
   pinPost,
   publishDraft,
-  toggleCommentReaction,
   toggleReaction,
   unpinPost,
 } from "@/app/(app)/groups/[slug]/actions";
 import { toggleSaved } from "@/app/(app)/saved/actions";
 import { db } from "@/db";
-import {
-  commentReactions,
-  comments,
-  posts,
-  reactions,
-  user as users,
-} from "@/db/schema";
+import { comments, posts, reactions, user as users } from "@/db/schema";
 import { buttonStyles } from "@/components/page-header";
 import { BackIcon, PlusIcon } from "@/components/icons";
-import { LikeButton, PostActionBar } from "@/components/post-action-bar";
-import { MentionText } from "@/components/mention-text";
-import { MentionTextarea } from "@/components/mention-textarea";
+import { PostEngagement } from "@/components/post-engagement";
 import { LinkCard } from "@/components/link-card";
 import { AddToCollection } from "@/components/add-to-collection";
 import { linkifyMarkdown } from "@/lib/mentions";
 import { listGroupMembers } from "@/lib/queries/groups";
+import { listRootComments } from "@/lib/queries/comments";
 import { listGroupCollections } from "@/lib/queries/group-collections";
 import { SaveButton } from "@/components/save-button";
 import { PostActionsMenu } from "@/components/post-actions-menu";
@@ -50,23 +40,6 @@ function fullDate(date: Date) {
     month: "long",
     day: "numeric",
   });
-}
-
-/**
- * "Aug 12 at 2:33 PM" for the summary line. Formatted on the server and passed down as a
- * string so the client bar cannot render a different locale or timezone than the markup
- * it hydrates.
- */
-function dateTimeLabel(date: Date) {
-  const day = date.toLocaleDateString(undefined, {
-    month: "short",
-    day: "numeric",
-  });
-  const time = date.toLocaleTimeString(undefined, {
-    hour: "numeric",
-    minute: "2-digit",
-  });
-  return `${day} at ${time}`;
 }
 
 export default async function PostPage({ params }: PostPageProps) {
@@ -103,27 +76,22 @@ export default async function PostPage({ params }: PostPageProps) {
   if (post.status === "draft" && post.authorId !== user.id) notFound();
 
   const [
-    commentRows,
+    rootPage,
+    commentTotal,
     reactionCounts,
     currentUserReactions,
     saved,
-    commentReactionCounts,
-    myCommentReactions,
     groupMembers,
     groupCollections,
   ] = await Promise.all([
+    // First page of top-level comments, each hydrated with its like state and direct-reply
+    // count. Replies load lazily per node — the whole tree is never fetched here.
+    listRootComments(post.id, null, user.id),
+    // Total comment count (all depths) for the section header — one indexed COUNT.
     db
-      .select({
-        id: comments.id,
-        body: comments.body,
-        createdAt: comments.createdAt,
-        authorId: comments.authorId,
-        authorName: users.name,
-      })
+      .select({ n: count() })
       .from(comments)
-      .innerJoin(users, eq(users.id, comments.authorId))
-      .where(eq(comments.postId, post.id))
-      .orderBy(asc(comments.createdAt)),
+      .where(eq(comments.postId, post.id)),
     // countDistinct on user_id, NOT a sum of per-emoji counts: one member can still hold
     // more than one legacy emoji row on the same post, and summing would count them
     // twice. A like is a person, not a row.
@@ -143,52 +111,13 @@ export default async function PostPage({ params }: PostPageProps) {
     // In the same batch: it only needs post.id and user.id, both already known, so
     // awaiting it separately was one more sequential round-trip for nothing.
     isSaved(user.id, post.id),
-    // Reaction counts per comment on this post, and which are mine — joined through
-    // comments so the whole set comes back in one grouped query.
-    db
-      .select({
-        commentId: commentReactions.commentId,
-        emoji: commentReactions.emoji,
-        count: count(),
-      })
-      .from(commentReactions)
-      .innerJoin(comments, eq(comments.id, commentReactions.commentId))
-      .where(eq(comments.postId, post.id))
-      .groupBy(commentReactions.commentId, commentReactions.emoji),
-    db
-      .select({
-        commentId: commentReactions.commentId,
-        emoji: commentReactions.emoji,
-      })
-      .from(commentReactions)
-      .innerJoin(comments, eq(comments.id, commentReactions.commentId))
-      .where(
-        and(
-          eq(comments.postId, post.id),
-          eq(commentReactions.userId, user.id),
-        ),
-      ),
     listGroupMembers(group.id),
     listGroupCollections(group.id),
   ]);
   // One like per member, counted across every emoji ever stored — see LIKE_EMOJI.
   const likeCount = reactionCounts[0]?.users ?? 0;
   const liked = currentUserReactions.length > 0;
-
-  // Per-comment reaction lookups: commentId -> { emoji: count } and commentId -> [mine].
-  const commentCounts = new Map<string, Record<string, number>>();
-  for (const row of commentReactionCounts) {
-    const bucket = commentCounts.get(row.commentId) ?? {};
-    bucket[row.emoji] = row.count;
-    commentCounts.set(row.commentId, bucket);
-  }
-  const commentMine = new Map<string, string[]>();
-  for (const row of myCommentReactions) {
-    commentMine.set(row.commentId, [
-      ...(commentMine.get(row.commentId) ?? []),
-      row.emoji,
-    ]);
-  }
+  const totalComments = Number(commentTotal[0]?.n ?? 0);
   // presentational only — the actions re-check this in their own WHERE clause
   const canManagePost = role === "owner" || post.authorId === user.id;
 
@@ -200,7 +129,7 @@ export default async function PostPage({ params }: PostPageProps) {
       <header className="flex flex-wrap items-center justify-between gap-x-4 gap-y-3 border-b border-line pb-5">
         <Link href={`/groups/${slug}`} className="group inline-flex min-w-0 items-center gap-1.5 text-sm font-medium text-muted transition hover:text-ink">
           <BackIcon size={16} className="transition group-hover:-translate-x-0.5" />
-          <span className="truncate">{group.name}</span>
+          <span className="truncate">Back</span>
         </Link>
         <div className="flex shrink-0 items-center gap-2">
           {post.status === "published" ? (
@@ -323,99 +252,22 @@ export default async function PostPage({ params }: PostPageProps) {
       </article>
 
       {post.status === "published" ? (
-      <>
-        <section aria-label="Post actions" className="mt-10 border-t border-line pt-4">
-          <PostActionBar
-            likes={likeCount}
-            liked={liked}
-            comments={commentRows.length}
-            dateLabel={dateTimeLabel(post.createdAt)}
-            shareUrl={`/groups/${slug}/p/${post.id}`}
-            onToggleLike={async () => {
-              "use server";
-              await toggleReaction(slug, post.id, LIKE_EMOJI);
-            }}
-          />
-        </section>
-
-      <section aria-labelledby="comments-heading" className="mt-10 border-t border-line pt-8">
-        <h2 id="comments-heading" className="text-base font-semibold tracking-tight text-ink">Comments <span className="font-normal text-faint">{commentRows.length}</span></h2>
-        <form action={addComment.bind(null, slug, post.id)} className="mt-4">
-          <label htmlFor="comment" className="sr-only">Add a comment</label>
-          <MentionTextarea
-            id="comment"
-            name="body"
-            members={groupMembers}
-            required
-            minLength={1}
-            maxLength={5000}
-            rows={3}
-            placeholder="Add a comment… use @ to mention"
-            className="w-full resize-y rounded-xl border border-line bg-surface px-3 py-2.5 text-sm leading-6 outline-none transition placeholder:text-faint focus:border-inverse focus:ring-2 focus:ring-inverse/10"
-          />
-          <div className="mt-3 flex justify-end">
-            <SubmitButton
-              pendingLabel="Posting…"
-              className="rounded-lg bg-inverse px-4 py-2.5 text-sm font-medium text-inverse-ink hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inverse focus-visible:ring-offset-2"
-            >
-              Comment
-            </SubmitButton>
-          </div>
-        </form>
-
-        {commentRows.length ? (
-          <ul className="mt-5 divide-y divide-hairline border-t border-hairline">
-            {commentRows.map((comment) => (
-              <li key={comment.id} className="flex gap-2.5 py-4">
-                <Avatar name={comment.authorName} size="sm" className="mt-0.5" />
-                <div className="min-w-0 flex-1">
-                  <p className="text-sm font-medium text-ink">
-                    {comment.authorName}{" "}
-                    <span className="font-normal text-faint">· {fullDate(comment.createdAt)}</span>
-                  </p>
-                  <MentionText
-                    text={comment.body}
-                    members={groupMembers}
-                    className="mt-1 whitespace-pre-wrap break-words text-sm leading-6 text-muted"
-                  />
-                  <div className="mt-1.5">
-                    <LikeButton
-                      likes={Object.values(commentCounts.get(comment.id) ?? {}).reduce(
-                        (sum, n) => sum + n,
-                        0,
-                      )}
-                      liked={(commentMine.get(comment.id) ?? []).length > 0}
-                      label="comment"
-                      onToggle={async () => {
-                        "use server";
-                        await toggleCommentReaction(
-                          slug,
-                          post.id,
-                          comment.id,
-                          LIKE_EMOJI,
-                        );
-                      }}
-                    />
-                  </div>
-                </div>
-                {role === "owner" || comment.authorId === user.id ? (
-                  <PostActionsMenu
-                    deleteLabel="Delete comment"
-                    confirmText="Delete this comment?"
-                    onDelete={async () => {
-                      "use server";
-                      await deleteComment(slug, post.id, comment.id);
-                    }}
-                  />
-                ) : null}
-              </li>
-            ))}
-          </ul>
-        ) : null}
-        {/* deliberately no empty-state card: the compose box above already reads
-            "Add a comment…", so a second "no comments yet" panel is redundant noise */}
-      </section>
-      </>
+        <PostEngagement
+          slug={slug}
+          postId={post.id}
+          likes={likeCount}
+          liked={liked}
+          totalComments={totalComments}
+          shareUrl={`/groups/${slug}/p/${post.id}`}
+          onToggleLike={async () => {
+            "use server";
+            await toggleReaction(slug, post.id, LIKE_EMOJI);
+          }}
+          initial={rootPage}
+          members={groupMembers}
+          viewerId={user.id}
+          isOwner={role === "owner"}
+        />
       ) : null}
     </main>
   );

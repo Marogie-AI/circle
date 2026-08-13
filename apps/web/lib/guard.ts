@@ -26,7 +26,7 @@ export const requireMember = cache(async (slug: string) => {
   };
 });
 
-export async function requireSession() {
+export const requireSession = cache(async () => {
   const session = await auth.api.getSession({ headers: await headers() });
 
   if (!session) {
@@ -34,4 +34,4 @@ export async function requireSession() {
   }
 
   return session;
-}
+});

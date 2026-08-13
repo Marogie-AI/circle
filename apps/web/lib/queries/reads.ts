@@ -1,6 +1,7 @@
 import { and, eq, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { groupReads } from "@/db/schema";
+import { invalidateChromeFor } from "@/lib/cache-keys";
 import { SIDEBAR_GROUP_LIMIT } from "@/lib/queries/groups";
 
 /**
@@ -71,4 +72,5 @@ export async function markGroupSeen(groupId: string, userId: string) {
       target: [groupReads.groupId, groupReads.userId],
       set: { lastSeenAt: new Date() },
     });
+  await invalidateChromeFor([userId]);
 }

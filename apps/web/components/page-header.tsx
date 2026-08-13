@@ -41,9 +41,13 @@ export function PageHeader({
   );
 }
 
+/* Shared motion: 200ms with the ease-out-quart token, a 1px hover lift with a soft
+   shadow, and a press-down scale. Transform/shadow are listed explicitly so the lift
+   animates; motion-reduce drops the transforms but keeps the color transitions. */
+export const buttonMotion =
+  "transition-[background-color,border-color,color,box-shadow,transform,opacity] duration-200 ease-out-quart hover:-translate-y-px hover:shadow-sm active:translate-y-0 active:scale-[0.97] motion-reduce:transform-none";
+
 export const buttonStyles = {
-  primary:
-    "inline-flex items-center justify-center rounded-lg bg-inverse px-3.5 py-2 text-sm font-medium text-inverse-ink transition hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inverse focus-visible:ring-offset-2",
-  secondary:
-    "inline-flex items-center justify-center rounded-lg border border-line bg-surface px-3.5 py-2 text-sm font-medium text-ink transition hover:bg-hover hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inverse focus-visible:ring-offset-2",
+  primary: `inline-flex items-center justify-center rounded-lg bg-inverse px-3.5 py-2 text-sm font-medium text-inverse-ink ${buttonMotion} hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inverse focus-visible:ring-offset-2`,
+  secondary: `inline-flex items-center justify-center rounded-lg border border-line bg-surface px-3.5 py-2 text-sm font-medium text-ink ${buttonMotion} hover:bg-hover hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inverse focus-visible:ring-offset-2`,
 } as const;

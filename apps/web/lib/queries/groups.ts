@@ -1,6 +1,8 @@
 import { asc, desc, eq, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { groups, memberships, posts, user } from "@/db/schema";
+import { cached } from "@/lib/cache";
+import { keys } from "@/lib/cache-keys";
 
 /**
  * How many groups the sidebar shows, and therefore how many the unread query counts.
@@ -36,13 +38,15 @@ export type UserGroup = Awaited<ReturnType<typeof listGroupsForUser>>[number];
  * Covered by the memberships primary key (group_id, user_id).
  */
 export async function listGroupMembers(groupId: string) {
-  return db
-    .select({ id: user.id, name: user.name })
-    .from(memberships)
-    .innerJoin(user, eq(user.id, memberships.userId))
-    .where(eq(memberships.groupId, groupId))
-    .orderBy(asc(memberships.joinedAt))
-    .limit(200);
+  return cached(keys.groupMembers(groupId), 5 * 60, async () =>
+    db
+      .select({ id: user.id, name: user.name })
+      .from(memberships)
+      .innerJoin(user, eq(user.id, memberships.userId))
+      .where(eq(memberships.groupId, groupId))
+      .orderBy(asc(memberships.joinedAt))
+      .limit(200),
+  );
 }
 
 /** Member count for a group. Cheap: covered by the memberships primary key. */
@@ -63,13 +67,19 @@ export async function countMembers(groupId: string) {
  * maintained on post insert/update — same shape, no query change at the call site.
  */
 export async function listTagFacets(groupId: string, limit = 12) {
-  const result = await db.execute<{ tag: string; count: number }>(sql`
-    SELECT unnest(${posts.tags}) AS tag, count(*)::int AS count
-    FROM ${posts}
-    WHERE ${posts.groupId} = ${groupId} AND ${posts.status} = 'published'
-    GROUP BY 1
-    ORDER BY count DESC, tag ASC
-    LIMIT ${limit}
-  `);
-  return result.rows;
+  const load = async () => {
+    const result = await db.execute<{ tag: string; count: number }>(sql`
+      SELECT unnest(${posts.tags}) AS tag, count(*)::int AS count
+      FROM ${posts}
+      WHERE ${posts.groupId} = ${groupId} AND ${posts.status} = 'published'
+      GROUP BY 1
+      ORDER BY count DESC, tag ASC
+      LIMIT ${limit}
+    `);
+    return result.rows;
+  };
+
+  // The key intentionally represents the one product query. Tests and future admin
+  // callers can request another limit without poisoning that shared value.
+  return limit === 12 ? cached(keys.groupTags(groupId), 2 * 60, load) : load();
 }

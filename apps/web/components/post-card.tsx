@@ -1,7 +1,7 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { PlayFilledIcon } from "@/components/icons";
-import { KindIcon } from "@/components/kind-icon";
+import { KindIcon, KIND_CHIP } from "@/components/kind-icon";
 import { coverExcerpt, coverWash } from "@/lib/cover";
 import {
   DEFAULT_POST_KIND,
@@ -125,7 +125,9 @@ export function PostCard({
 
       <div className="flex min-w-0 flex-1 flex-col gap-2 px-4 pb-3 pt-3">
         <div className="flex min-w-0 items-center gap-2">
-          <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-rail px-2 py-0.5 text-[11px] font-medium text-muted">
+          <span
+            className={`inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium ${KIND_CHIP[kind]}`}
+          >
             <KindIcon kind={kind} size={12} />
             {KIND_LABELS[kind]}
           </span>

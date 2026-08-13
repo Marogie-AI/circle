@@ -2,6 +2,7 @@
 
 import { useOptimistic, useTransition } from "react";
 import { BookmarkIcon } from "@/components/icons";
+import { buttonMotion } from "@/components/page-header";
 
 /** Bookmark toggle. Optimistic for the same reason as reactions: it should feel instant. */
 export function SaveButton({
@@ -30,7 +31,7 @@ export function SaveButton({
       }
       className={
         variant === "labelled"
-          ? `inline-flex items-center justify-center gap-1.5 rounded-lg border px-3.5 py-2 text-sm font-medium transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inverse focus-visible:ring-offset-2 ${
+          ? `inline-flex items-center justify-center gap-1.5 rounded-lg border px-3.5 py-2 text-sm font-medium ${buttonMotion} focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inverse focus-visible:ring-offset-2 ${
               isSaved
                 ? "border-inverse bg-inverse text-inverse-ink"
                 : "border-line bg-surface text-ink hover:bg-hover"

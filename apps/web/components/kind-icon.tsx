@@ -17,6 +17,18 @@ export const KIND_ICONS: Record<PostKind, typeof VideoIcon> = {
   note: NoteIcon,
 };
 
+/**
+ * Chip colour per kind. Semi-transparent fill + a mid-tone text colour so it reads on any
+ * surface and in either theme (the rest of the UI is intentionally near-monochrome; the
+ * kind chip is the one deliberate spot of colour).
+ */
+export const KIND_CHIP: Record<PostKind, string> = {
+  video: "bg-red-500/10 text-red-600",
+  article: "bg-blue-500/10 text-blue-600",
+  tool: "bg-emerald-500/10 text-emerald-600",
+  note: "bg-amber-500/10 text-amber-600",
+};
+
 export function KindIcon({
   kind,
   size = 16,

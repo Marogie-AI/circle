@@ -4,8 +4,9 @@ import { headers } from "next/headers";
 import { revalidatePath } from "next/cache";
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
-import { user } from "@/db/schema";
+import { memberships, user } from "@/db/schema";
 import { auth } from "@/lib/auth";
+import { invalidateDisplayNameForGroups } from "@/lib/cache-keys";
 import { requireSession } from "@/lib/guard";
 
 export type SettingsState = { error?: string; ok?: string };
@@ -14,7 +15,7 @@ export async function updateDisplayName(
   _prev: SettingsState,
   formData: FormData,
 ): Promise<SettingsState> {
-  await requireSession();
+  const session = await requireSession();
   const name = String(formData.get("name") ?? "").trim();
   if (name.length < 1 || name.length > 60) {
     return { error: "Name must be between 1 and 60 characters." };
@@ -23,6 +24,12 @@ export async function updateDisplayName(
   // Go through better-auth rather than writing the user row directly, so its session
   // cache stays consistent with the database.
   await auth.api.updateUser({ body: { name }, headers: await headers() });
+
+  const groupRows = await db
+    .select({ groupId: memberships.groupId })
+    .from(memberships)
+    .where(eq(memberships.userId, session.user.id));
+  await invalidateDisplayNameForGroups(groupRows.map((row) => row.groupId));
 
   // the name is rendered in avatars, post bylines and comments across the app
   revalidatePath("/", "layout");

@@ -15,6 +15,7 @@ import {
   posts,
   reactions,
 } from "@/db/schema";
+import { invalidateGroupContent } from "@/lib/cache-keys";
 import { requireMember } from "@/lib/guard";
 import { safeFetchPreview } from "@/lib/link-preview";
 import { DEFAULT_POST_KIND, parsePostKind, type PostKind } from "@/lib/kind";
@@ -22,6 +23,7 @@ import { extractMentionIds } from "@/lib/mentions";
 import { notify } from "@/lib/notify";
 import { isUuid, REACTION_EMOJIS } from "@/lib/post";
 import { listGroupMembers } from "@/lib/queries/groups";
+import { listReplies, listRootComments } from "@/lib/queries/comments";
 import { allow } from "@/lib/rate-limit";
 import {
   fetchStockImage,
@@ -102,6 +104,7 @@ export async function pinPost(slug: string, postId: string) {
   if (role !== "owner") throw new Error("Only the owner can pin posts.");
   if (!(await publishedPostInGroup(postId, group.id))) notFound();
   await db.update(posts).set({ pinnedAt: new Date() }).where(eq(posts.id, postId));
+  await invalidateGroupContent(group.id);
   revalidatePath(`/groups/${slug}`);
   revalidatePath(`/groups/${slug}/p/${postId}`);
 }
@@ -111,6 +114,7 @@ export async function unpinPost(slug: string, postId: string) {
   if (role !== "owner") throw new Error("Only the owner can unpin posts.");
   if (!(await publishedPostInGroup(postId, group.id))) notFound();
   await db.update(posts).set({ pinnedAt: null }).where(eq(posts.id, postId));
+  await invalidateGroupContent(group.id);
   revalidatePath(`/groups/${slug}`);
   revalidatePath(`/groups/${slug}/p/${postId}`);
 }
@@ -159,9 +163,12 @@ export async function publishDraft(slug: string, postId: string) {
     ))
   ) {
     if (post.url) {
-      attachPreview(postId, post.url, post.title, post.tags);
+      attachPreview(group.id, postId, post.url, post.title, post.tags);
     } else {
-      after(() => attachStockCover(postId, post.title, post.tags));
+      after(async () => {
+        await attachStockCover(postId, post.title, post.tags);
+        await invalidateGroupContent(group.id);
+      });
     }
   }
 
@@ -181,6 +188,7 @@ export async function publishDraft(slug: string, postId: string) {
     );
   });
 
+  await invalidateGroupContent(group.id);
   revalidatePath(`/groups/${slug}`);
   redirect(`/groups/${slug}/p/${postId}`);
 }
@@ -298,6 +306,7 @@ function readDraftFields(formData: FormData): PostFields {
  * moment later. safeFetchPreview enforces the SSRF guards and returns null on failure.
  */
 function attachPreview(
+  groupId: string,
   postId: string,
   url: string | null,
   title: string,
@@ -319,6 +328,7 @@ function attachPreview(
 
     // The linked page had no artwork of its own — fall back to a stock cover.
     if (!preview?.image) await attachStockCover(postId, title, tags);
+    await invalidateGroupContent(groupId);
   });
 }
 
@@ -482,10 +492,13 @@ export async function createPost(
   ) {
     if (fields.url) {
       // attachPreview falls through to a stock cover if the page has no image.
-      attachPreview(newPost.id, fields.url, fields.title, fields.tags);
+      attachPreview(group.id, newPost.id, fields.url, fields.title, fields.tags);
     } else {
       // No link at all — a note. Nothing to preview, so go straight to a cover.
-      after(() => attachStockCover(newPost.id, fields.title, fields.tags));
+      after(async () => {
+        await attachStockCover(newPost.id, fields.title, fields.tags);
+        await invalidateGroupContent(group.id);
+      });
     }
   }
 
@@ -514,6 +527,7 @@ export async function createPost(
     );
   });
 
+  await invalidateGroupContent(group.id);
   revalidatePath(`/groups/${slug}`);
   redirect(`/groups/${slug}/p/${newPost.id}`);
 }
@@ -588,10 +602,16 @@ export async function updatePost(
     ))
   ) {
     if (fields.url) {
-      attachPreview(updated.id, fields.url, fields.title, fields.tags);
+      attachPreview(group.id, updated.id, fields.url, fields.title, fields.tags);
     } else {
-      after(() => attachStockCover(updated.id, fields.title, fields.tags));
+      after(async () => {
+        await attachStockCover(updated.id, fields.title, fields.tags);
+        await invalidateGroupContent(group.id);
+      });
     }
+  }
+  if (current.status !== "draft") {
+    await invalidateGroupContent(group.id);
   }
   revalidatePath(`/groups/${slug}/p/${postId}`);
   redirect(`/groups/${slug}/p/${postId}`);
@@ -615,6 +635,7 @@ export async function deletePost(slug: string, postId: string) {
   if (!deleted) notFound();
 
   // comments, reactions and saved_posts rows go with it via ON DELETE CASCADE
+  await invalidateGroupContent(group.id);
   revalidatePath(`/groups/${slug}`);
   redirect(`/groups/${slug}`);
 }
@@ -672,7 +693,10 @@ export async function deleteComment(
     .returning({ id: comments.id });
 
   if (!deleted) notFound();
-  revalidatePath(`/groups/${slug}/p/${postId}`);
+  await invalidateGroupContent(group.id);
+  // No revalidatePath: the client thread removes just this node (and its subtree) in place.
+  // Revalidating would refetch and re-render the whole comment tree, collapsing every
+  // thread the viewer had expanded — exactly what we don't want on a single delete.
 }
 
 export async function addComment(
@@ -707,24 +731,52 @@ export async function addComment(
     .limit(1);
   if (!post) notFound();
 
+  // Optional reply target. Threads are an arbitrary-depth tree: parentId points at the
+  // exact comment being replied to (no coercion). Scoping to postId keeps a reply from
+  // being grafted onto another post's thread — that is the security boundary.
+  const rawParent = String(formData.get("parentId") ?? "");
+  let parent: { id: string; authorId: string } | undefined;
+  if (rawParent) {
+    if (!isUuid(rawParent)) notFound();
+    const [row] = await db
+      .select({ id: comments.id, authorId: comments.authorId })
+      .from(comments)
+      .where(and(eq(comments.id, rawParent), eq(comments.postId, postId)))
+      .limit(1);
+    if (!row) notFound();
+    parent = { id: row.id, authorId: row.authorId };
+  }
+
   const [comment] = await db
     .insert(comments)
-    .values({ postId, authorId: user.id, body })
-    .returning({ id: comments.id });
+    .values({ postId, authorId: user.id, body, parentId: parent?.id ?? null })
+    .returning({ id: comments.id, createdAt: comments.createdAt });
+  await invalidateGroupContent(group.id);
   revalidatePath(`/groups/${slug}/p/${postId}`);
 
   // Notifications are best-effort, off the critical path: a database failure after the
   // comment was committed must not make the user retry and create duplicate content.
   after(async () => {
+    // A reply pings the comment it answers ("reply"); a top-level comment pings the post
+    // author ("comment"). notify() drops self-notifications on its own.
     await notify([
-      {
-        userId: post.authorId,
-        actorId: user.id,
-        type: "comment",
-        groupId: group.id,
-        postId,
-        commentId: comment.id,
-      },
+      parent
+        ? {
+            userId: parent.authorId,
+            actorId: user.id,
+            type: "reply" as const,
+            groupId: group.id,
+            postId,
+            commentId: comment.id,
+          }
+        : {
+            userId: post.authorId,
+            actorId: user.id,
+            type: "comment" as const,
+            groupId: group.id,
+            postId,
+            commentId: comment.id,
+          },
     ]);
     const members = await listGroupMembers(group.id);
     await notify(
@@ -738,6 +790,48 @@ export async function addComment(
       })),
     );
   });
+
+  // Returned so a client thread can optimistically append the new reply without refetching
+  // the whole level. New node: zero likes, zero replies, not yet liked by anyone.
+  return {
+    id: comment.id,
+    body,
+    createdAt: comment.createdAt,
+    authorId: user.id,
+    authorName: user.name,
+    parentId: parent?.id ?? null,
+    likeCount: 0,
+    liked: false,
+    replyCount: 0,
+  };
+}
+
+/**
+ * A page of a comment's direct replies, hydrated for the client thread to append. Auth is
+ * re-checked here (never trust the client-passed group scope); the query itself is scoped to
+ * postId so a member can't read replies from a post outside this group.
+ */
+export async function loadReplies(
+  slug: string,
+  postId: string,
+  parentId: string,
+  cursor: string | null,
+) {
+  const { group, user } = await requireMember(slug);
+  if (!isUuid(parentId)) notFound();
+  if (!(await publishedPostInGroup(postId, group.id))) notFound();
+  return listReplies(postId, parentId, cursor, user.id);
+}
+
+/** A page of top-level comments for the client section's "Load more comments". */
+export async function loadRootComments(
+  slug: string,
+  postId: string,
+  cursor: string | null,
+) {
+  const { group, user } = await requireMember(slug);
+  if (!(await publishedPostInGroup(postId, group.id))) notFound();
+  return listRootComments(postId, cursor, user.id);
 }
 
 export async function toggleReaction(
@@ -797,6 +891,7 @@ export async function toggleReaction(
     });
   }
 
+  await invalidateGroupContent(group.id);
   revalidatePath(`/groups/${slug}/p/${postId}`);
 }
 
@@ -848,6 +943,6 @@ export async function toggleCommentReaction(
       .values({ commentId, userId: user.id, emoji })
       .onConflictDoNothing();
   }
-
-  revalidatePath(`/groups/${slug}/p/${postId}`);
+  // No revalidatePath: the comment thread owns like state optimistically. Revalidating would
+  // refetch the page without updating the client-held comment props — the "like reverts" bug.
 }

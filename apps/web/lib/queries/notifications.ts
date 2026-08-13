@@ -1,6 +1,7 @@
 import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { groups, memberships, notifications, posts, user } from "@/db/schema";
+import { invalidateChromeFor } from "@/lib/cache-keys";
 
 export async function unreadNotificationCount(userId: string) {
   const [row] = await db
@@ -73,4 +74,5 @@ export async function markAllNotificationsRead(userId: string) {
     .where(
       and(eq(notifications.userId, userId), isNull(notifications.readAt)),
     );
+  await invalidateChromeFor([userId]);
 }

@@ -1,6 +1,7 @@
 import { and, eq, gt, isNull } from "drizzle-orm";
 import { db } from "@/db";
 import { groups, invites, memberships } from "@/db/schema";
+import { invalidateGroupMembership } from "@/lib/cache-keys";
 
 export async function findValidInvite(token: string) {
   const [invite] = await db
@@ -28,4 +29,5 @@ export async function acceptInvite(groupId: string, userId: string) {
     .insert(memberships)
     .values({ groupId, userId, role: "member" })
     .onConflictDoNothing();
+  await invalidateGroupMembership(groupId, [userId]);
 }

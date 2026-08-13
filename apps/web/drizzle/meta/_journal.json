@@ -113,6 +113,20 @@
       "when": 1786576202023,
       "tag": "0015_living_gargoyle",
       "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1786587459339,
+      "tag": "0016_silly_the_order",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1786589587348,
+      "tag": "0017_happy_eddie_brock",
+      "breakpoints": true
     }
   ]
 }

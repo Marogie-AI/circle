@@ -31,6 +31,45 @@
   --color-hover: oklch(0.97 0 0);     /* hover fill */
   --color-inverse: oklch(0.205 0 0);      /* active/primary fill */
   --color-inverse-ink: oklch(0.985 0 0);  /* text on inverse */
+
+  /* Shared motion easing: fast start, soft landing. Used by buttons and menus so
+     every interaction decelerates the same way. */
+  --ease-out-quart: cubic-bezier(0.25, 1, 0.5, 1);
+
+  /* Menus/popovers scale-fade in from their trigger corner (set transform-origin per
+     use). Enter-only: exit would need mount-state tracking for little perceived gain. */
+  --animate-menu-in: menu-in 140ms cubic-bezier(0.25, 1, 0.5, 1);
+  --animate-dialog-in: dialog-in 180ms cubic-bezier(0.25, 1, 0.5, 1);
+  --animate-fade-in: fade-in 150ms ease-out;
+
+  @keyframes menu-in {
+    from {
+      opacity: 0;
+      transform: scale(0.95) translateY(-4px);
+    }
+    to {
+      opacity: 1;
+      transform: scale(1) translateY(0);
+    }
+  }
+  @keyframes dialog-in {
+    from {
+      opacity: 0;
+      transform: scale(0.96);
+    }
+    to {
+      opacity: 1;
+      transform: scale(1);
+    }
+  }
+  @keyframes fade-in {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
 }
 
 .dark {

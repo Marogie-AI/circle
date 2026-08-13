@@ -11,6 +11,8 @@ import {
   posts,
 } from "@/db/schema";
 import { requireMember } from "@/lib/guard";
+import { invalidate } from "@/lib/cache";
+import { keys } from "@/lib/cache-keys";
 import { isUuid } from "@/lib/post";
 import { allow } from "@/lib/rate-limit";
 
@@ -82,6 +84,7 @@ export async function createGroupCollection(slug: string, formData: FormData) {
   await db
     .insert(collections)
     .values({ userId: user.id, groupId: group.id, name });
+  await invalidate(keys.groupCollections(group.id));
   revalidatePath(`/groups/${slug}`);
 }
 
@@ -98,6 +101,7 @@ export async function deleteGroupCollection(slug: string, collectionId: string) 
     throw new Error("Only the creator or an owner can delete this collection.");
   }
   await db.delete(collections).where(eq(collections.id, collectionId));
+  await invalidate(keys.groupCollections(group.id));
   revalidatePath(`/groups/${slug}`);
   redirect(`/groups/${slug}`);
 }
@@ -114,6 +118,7 @@ export async function addToCollection(
     .insert(collectionPosts)
     .values({ collectionId, postId, addedBy: user.id })
     .onConflictDoNothing();
+  await invalidate(keys.groupCollections(group.id));
   revalidatePath(`/groups/${slug}/collections/${collectionId}`);
   revalidatePath(`/groups/${slug}/p/${postId}`);
 }
@@ -133,6 +138,7 @@ export async function removeFromCollection(
         eq(collectionPosts.postId, postId),
       ),
     );
+  await invalidate(keys.groupCollections(group.id));
   revalidatePath(`/groups/${slug}/collections/${collectionId}`);
   revalidatePath(`/groups/${slug}/p/${postId}`);
 }

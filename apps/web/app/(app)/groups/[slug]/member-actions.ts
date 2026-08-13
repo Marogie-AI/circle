@@ -6,6 +6,10 @@ import { redirect } from "next/navigation";
 import { db } from "@/db";
 import { groups, memberships } from "@/db/schema";
 import { requireMember } from "@/lib/guard";
+import {
+  invalidateGroupContent,
+  invalidateGroupMembership,
+} from "@/lib/cache-keys";
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
@@ -61,6 +65,7 @@ export async function setMemberRole(
       );
   });
 
+  await invalidateGroupMembership(group.id, [userId]);
   revalidatePath(`/groups/${slug}/settings`);
 }
 
@@ -76,14 +81,28 @@ export async function removeMember(slug: string, userId: string) {
       );
   });
 
+  await invalidateGroupMembership(group.id, [userId]);
   revalidatePath(`/groups/${slug}/settings`);
 }
 
 export async function deleteGroup(slug: string) {
   const group = await requireOwner(slug);
 
+  const memberRows = await db
+    .select({ userId: memberships.userId })
+    .from(memberships)
+    .where(eq(memberships.groupId, group.id));
+
   // groups cascades to memberships, invites, posts, etc.
   await db.delete(groups).where(eq(groups.id, group.id));
+
+  await Promise.all([
+    invalidateGroupMembership(
+      group.id,
+      memberRows.map((member) => member.userId),
+    ),
+    invalidateGroupContent(group.id),
+  ]);
 
   redirect("/groups");
 }

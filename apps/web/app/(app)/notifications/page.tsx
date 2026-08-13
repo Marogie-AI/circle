@@ -11,6 +11,7 @@ import {
 // The verb each notification type reads as, dropped between the actor and the subject.
 const VERBS: Record<string, string> = {
   comment: "commented on",
+  reply: "replied to your comment on",
   reaction: "reacted to",
   new_post: "posted in",
   mention: "mentioned you in",

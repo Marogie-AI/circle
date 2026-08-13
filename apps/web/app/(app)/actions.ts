@@ -5,6 +5,7 @@ import { count, eq } from "drizzle-orm";
 import { groups, memberships, user } from "@/db/schema";
 import { db } from "@/db";
 import { requireSession } from "@/lib/guard";
+import { invalidateGroupMembership } from "@/lib/cache-keys";
 import { allow } from "@/lib/rate-limit";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
@@ -61,6 +62,7 @@ export async function createGroup(formData: FormData) {
 
   const baseSlug = makeSlug(name);
   let createdSlug: string | undefined;
+  let createdGroupId: string | undefined;
 
   for (let attempt = 0; attempt < MAX_CREATE_ATTEMPTS; attempt += 1) {
     const slug =
@@ -96,6 +98,7 @@ export async function createGroup(formData: FormData) {
           userId: session.user.id,
           role: "owner",
         });
+        createdGroupId = group.id;
       });
 
       createdSlug = slug;
@@ -109,6 +112,12 @@ export async function createGroup(formData: FormData) {
 
   if (!createdSlug) {
     throw new Error("Unable to create a unique group slug.");
+  }
+
+  // Creating a group also creates its first membership, so both the sidebar payload and
+  // the member picker have a cached representation to evict.
+  if (createdGroupId) {
+    await invalidateGroupMembership(createdGroupId, [session.user.id]);
   }
 
   revalidatePath("/groups");

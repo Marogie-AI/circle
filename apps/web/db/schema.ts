@@ -2,6 +2,7 @@ export * from "./auth-schema";
 
 import { desc, sql } from "drizzle-orm";
 import {
+  type AnyPgColumn,
   foreignKey,
   index,
   integer,
@@ -163,12 +164,25 @@ export const comments = pgTable(
       .notNull()
       .references(() => user.id),
     body: text("body").notNull(),
+    // Arbitrary-depth tree: parentId points at the exact comment being replied
+    // to, with no coercion (see addComment). Null for a root comment. Cascade:
+    // replies die with their parent.
+    parentId: uuid("parent_id").references((): AnyPgColumn => comments.id, {
+      onDelete: "cascade",
+    }),
     createdAt: timestamp("created_at").notNull().defaultNow(),
   },
   (table) => [
     index("comments_post_id_created_at_idx").on(
       table.postId,
       table.createdAt,
+    ),
+    // Keyset pagination of a comment's direct children (the only tree query shape:
+    // "next page of replies to X"). Also makes the parent_id cascade delete indexed.
+    index("comments_parent_id_created_at_idx").on(
+      table.parentId,
+      table.createdAt,
+      table.id,
     ),
   ],
 );
@@ -243,12 +257,12 @@ export const commentReactions = pgTable(
 );
 
 /**
- * Fixed-window rate limit counters.
+ * Fixed-window rate limit fallback counters.
  *
- * In Postgres rather than memory because serverless instances do not share memory — an
- * in-process Map would reset on every cold start and would be per-instance, so Vercel
- * spinning up more instances under load defeats exactly the limit you wanted. This costs
- * one extra round-trip on paths that already talk to Postgres.
+ * Production normally counts in Upstash Redis. This table keeps local development
+ * dependency-free and preserves durable, cross-instance limits during a Redis timeout or
+ * error. An in-process Map cannot fill that role: serverless instances do not share it and
+ * every cold start would erase it.
  *
  * `key` encodes scope and subject, e.g. "post:<userId>" or "mobile:<userId>".
  */
