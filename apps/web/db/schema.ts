@@ -2,6 +2,7 @@ export * from "./auth-schema";
 
 import { desc, sql } from "drizzle-orm";
 import {
+  type AnyPgColumn,
   foreignKey,
   index,
   integer,
@@ -163,12 +164,24 @@ export const comments = pgTable(
       .notNull()
       .references(() => user.id),
     body: text("body").notNull(),
+    // One level deep: replies always point at a top-level comment (the action
+    // coerces reply-to-reply to the parent). Cascade: replies die with parent.
+    parentId: uuid("parent_id").references((): AnyPgColumn => comments.id, {
+      onDelete: "cascade",
+    }),
     createdAt: timestamp("created_at").notNull().defaultNow(),
   },
   (table) => [
     index("comments_post_id_created_at_idx").on(
       table.postId,
       table.createdAt,
+    ),
+    // Keyset pagination of a comment's direct children (the only tree query shape:
+    // "next page of replies to X"). Also makes the parent_id cascade delete indexed.
+    index("comments_parent_id_created_at_idx").on(
+      table.parentId,
+      table.createdAt,
+      table.id,
     ),
   ],
 );

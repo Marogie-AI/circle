@@ -2,7 +2,7 @@
 
 import { useOptimistic, useTransition } from "react";
 import { CopyButton } from "@/components/copy-button";
-import { ReactionIcon } from "@/components/icons";
+import { CommentIcon, ReactionIcon } from "@/components/icons";
 
 type LikeState = { likes: number; liked: boolean };
 
@@ -74,34 +74,50 @@ function LikeGlyph({
   );
 }
 
-/** The row under a post: like, copy link, then a summary of counts and the date. */
+/** The row under a post: like, comment toggle, copy link, then a summary of counts. */
 export function PostActionBar({
   likes,
   liked,
   comments,
-  dateLabel,
   shareUrl,
   onToggleLike,
+  commentsOpen,
+  onToggleComments,
 }: {
   likes: number;
   liked: boolean;
   comments: number;
-  /** Rendered as-is; the server formats it so the markup matches on hydration. */
-  dateLabel: string;
   /** Root-relative path to this post; CopyButton resolves it against the origin. */
   shareUrl: string;
   onToggleLike: () => Promise<void>;
+  /** When provided, renders a comment button that shows/hides the comment section. */
+  commentsOpen?: boolean;
+  onToggleComments?: () => void;
 }) {
   // One state, two readers: the glyph below and the summary line under it.
   const { state, toggle } = useLike(likes, liked, onToggleLike);
 
   return (
     <div>
-      <div className="flex items-center gap-1">
+      {/* -ml-2.5 cancels the glyph's own padding so the first icon lines up with the
+          summary text below it. */}
+      <div className="-ml-2.5 flex items-center gap-1">
         <LikeGlyph state={state} label="post" size="lg" onClick={toggle} />
 
-        {/* No comment button: the comments sit directly below this bar, and the summary
-            line already carries the reply count. */}
+        {onToggleComments ? (
+          <button
+            type="button"
+            onClick={onToggleComments}
+            aria-expanded={commentsOpen}
+            aria-label={commentsOpen ? "Hide comments" : "Show comments"}
+            className={`flex items-center rounded-full px-2.5 py-1.5 text-sm transition hover:bg-hover hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inverse focus-visible:ring-offset-2 ${
+              commentsOpen ? "text-ink" : "text-muted"
+            }`}
+          >
+            <CommentIcon size={19} />
+          </button>
+        ) : null}
+
         <CopyButton
           value={shareUrl}
           variant="icon"
@@ -110,12 +126,11 @@ export function PostActionBar({
         />
       </div>
 
-      <div className="mt-2 flex items-center justify-between gap-4 border-y border-hairline py-2.5 text-sm text-muted">
+      <div className="mt-1 py-1 text-sm text-muted">
         <p className="min-w-0 truncate">
           {state.likes} {state.likes === 1 ? "Like" : "Likes"} · {comments}{" "}
           {comments === 1 ? "Reply" : "Replies"}
         </p>
-        <p className="shrink-0">{dateLabel}</p>
       </div>
     </div>
   );

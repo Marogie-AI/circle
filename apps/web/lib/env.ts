@@ -2,9 +2,10 @@
  * Fail the build, not the first request.
  *
  * Without this a missing DATABASE_URL produces a green deploy that 500s the moment
- * someone loads a page, and a missing BETTER_AUTH_SECRET produces sessions that silently
- * never validate. Neither variable is read anywhere in app code — better-auth picks its
- * two up implicitly — which is exactly why their absence is invisible today.
+ * someone loads a page, a missing BETTER_AUTH_SECRET produces sessions that silently
+ * never validate, and a half-configured Redis cache quietly turns every request into a
+ * database read. Some of these are consumed implicitly by their libraries, which is
+ * exactly why their absence would otherwise be invisible here.
  *
  * Imported by db/index.ts, so every server entrypoint (pages, Server Actions,
  * /api/mobile/*, lib/auth.ts, the test suite) runs it. On Vercel it throws at module
@@ -13,11 +14,19 @@
 
 const isProduction = process.env.NODE_ENV === "production";
 
-// better-auth generates a dev fallback for its two locally, so requiring them outside
-// production would break every existing checkout for no gain.
+// better-auth generates a dev fallback locally, and Redis is an optional optimization in
+// development. Requiring either outside production would break existing checkouts for no
+// gain; a production deploy, by contrast, should fail before it silently runs uncached.
 const required = [
   "DATABASE_URL",
-  ...(isProduction ? ["BETTER_AUTH_SECRET", "BETTER_AUTH_URL"] : []),
+  ...(isProduction
+    ? [
+        "BETTER_AUTH_SECRET",
+        "BETTER_AUTH_URL",
+        "UPSTASH_REDIS_REST_URL",
+        "UPSTASH_REDIS_REST_TOKEN",
+      ]
+    : []),
 ];
 
 const missing = required.filter((key) => !process.env[key]);

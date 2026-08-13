@@ -22,6 +22,7 @@ import { extractMentionIds } from "@/lib/mentions";
 import { notify } from "@/lib/notify";
 import { isUuid, REACTION_EMOJIS } from "@/lib/post";
 import { listGroupMembers } from "@/lib/queries/groups";
+import { listReplies, listRootComments } from "@/lib/queries/comments";
 import { allow } from "@/lib/rate-limit";
 import {
   fetchStockImage,
@@ -672,7 +673,9 @@ export async function deleteComment(
     .returning({ id: comments.id });
 
   if (!deleted) notFound();
-  revalidatePath(`/groups/${slug}/p/${postId}`);
+  // No revalidatePath: the client thread removes just this node (and its subtree) in place.
+  // Revalidating would refetch and re-render the whole comment tree, collapsing every
+  // thread the viewer had expanded — exactly what we don't want on a single delete.
 }
 
 export async function addComment(
@@ -707,24 +710,51 @@ export async function addComment(
     .limit(1);
   if (!post) notFound();
 
+  // Optional reply target. Threads are an arbitrary-depth tree: parentId points at the
+  // exact comment being replied to (no coercion). Scoping to postId keeps a reply from
+  // being grafted onto another post's thread — that is the security boundary.
+  const rawParent = String(formData.get("parentId") ?? "");
+  let parent: { id: string; authorId: string } | undefined;
+  if (rawParent) {
+    if (!isUuid(rawParent)) notFound();
+    const [row] = await db
+      .select({ id: comments.id, authorId: comments.authorId })
+      .from(comments)
+      .where(and(eq(comments.id, rawParent), eq(comments.postId, postId)))
+      .limit(1);
+    if (!row) notFound();
+    parent = { id: row.id, authorId: row.authorId };
+  }
+
   const [comment] = await db
     .insert(comments)
-    .values({ postId, authorId: user.id, body })
-    .returning({ id: comments.id });
+    .values({ postId, authorId: user.id, body, parentId: parent?.id ?? null })
+    .returning({ id: comments.id, createdAt: comments.createdAt });
   revalidatePath(`/groups/${slug}/p/${postId}`);
 
   // Notifications are best-effort, off the critical path: a database failure after the
   // comment was committed must not make the user retry and create duplicate content.
   after(async () => {
+    // A reply pings the comment it answers ("reply"); a top-level comment pings the post
+    // author ("comment"). notify() drops self-notifications on its own.
     await notify([
-      {
-        userId: post.authorId,
-        actorId: user.id,
-        type: "comment",
-        groupId: group.id,
-        postId,
-        commentId: comment.id,
-      },
+      parent
+        ? {
+            userId: parent.authorId,
+            actorId: user.id,
+            type: "reply" as const,
+            groupId: group.id,
+            postId,
+            commentId: comment.id,
+          }
+        : {
+            userId: post.authorId,
+            actorId: user.id,
+            type: "comment" as const,
+            groupId: group.id,
+            postId,
+            commentId: comment.id,
+          },
     ]);
     const members = await listGroupMembers(group.id);
     await notify(
@@ -738,6 +768,48 @@ export async function addComment(
       })),
     );
   });
+
+  // Returned so a client thread can optimistically append the new reply without refetching
+  // the whole level. New node: zero likes, zero replies, not yet liked by anyone.
+  return {
+    id: comment.id,
+    body,
+    createdAt: comment.createdAt,
+    authorId: user.id,
+    authorName: user.name,
+    parentId: parent?.id ?? null,
+    likeCount: 0,
+    liked: false,
+    replyCount: 0,
+  };
+}
+
+/**
+ * A page of a comment's direct replies, hydrated for the client thread to append. Auth is
+ * re-checked here (never trust the client-passed group scope); the query itself is scoped to
+ * postId so a member can't read replies from a post outside this group.
+ */
+export async function loadReplies(
+  slug: string,
+  postId: string,
+  parentId: string,
+  cursor: string | null,
+) {
+  const { group, user } = await requireMember(slug);
+  if (!isUuid(parentId)) notFound();
+  if (!(await publishedPostInGroup(postId, group.id))) notFound();
+  return listReplies(postId, parentId, cursor, user.id);
+}
+
+/** A page of top-level comments for the client section's "Load more comments". */
+export async function loadRootComments(
+  slug: string,
+  postId: string,
+  cursor: string | null,
+) {
+  const { group, user } = await requireMember(slug);
+  if (!(await publishedPostInGroup(postId, group.id))) notFound();
+  return listRootComments(postId, cursor, user.id);
 }
 
 export async function toggleReaction(
@@ -848,6 +920,6 @@ export async function toggleCommentReaction(
       .values({ commentId, userId: user.id, emoji })
       .onConflictDoNothing();
   }
-
-  revalidatePath(`/groups/${slug}/p/${postId}`);
+  // No revalidatePath: the comment thread owns like state optimistically. Revalidating would
+  // refetch the page without updating the client-held comment props — the "like reverts" bug.
 }

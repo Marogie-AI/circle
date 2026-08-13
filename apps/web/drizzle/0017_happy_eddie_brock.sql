@@ -1,0 +1,1 @@
+CREATE INDEX "comments_parent_id_created_at_idx" ON "comments" USING btree ("parent_id","created_at","id");
