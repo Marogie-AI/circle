@@ -5,7 +5,7 @@ import { redis } from "@/lib/redis";
 type CacheEntry = {
   key: string;
   ttl: number;
-  fn: () => Promise<any>;
+  fn: () => Promise<unknown>;
 };
 
 const jitteredTtl = (ttlSeconds: number) =>
@@ -83,9 +83,7 @@ export async function cached<T>(
  * every miss keeps its own TTL, but all SETs share one pipeline execution/HTTP round
  * trip.
  */
-export async function cachedMany<T extends Record<string, unknown>>(
-  entries: CacheEntry[],
-): Promise<any[]> {
+export async function cachedMany(entries: CacheEntry[]): Promise<unknown[]> {
   if (entries.length === 0) return [];
   if (!redis) return Promise.all(entries.map((entry) => entry.fn()));
 
@@ -97,7 +95,7 @@ export async function cachedMany<T extends Record<string, unknown>>(
     return Promise.all(entries.map((entry) => entry.fn()));
   }
 
-  const values: any[] = new Array(entries.length);
+  const values: unknown[] = new Array(entries.length);
   const fallbackIndexes: number[] = [];
   const missIndexes = new Set<number>();
 

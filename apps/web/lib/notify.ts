@@ -1,5 +1,6 @@
 import { db } from "@/db";
 import { notifications } from "@/db/schema";
+import { invalidateChromeFor } from "@/lib/cache-keys";
 
 export type NotificationType =
   | "comment"
@@ -38,4 +39,5 @@ export async function notify(rows: NotifyRow[]) {
       commentId: row.commentId ?? null,
     })),
   );
+  await invalidateChromeFor([...new Set(clean.map((row) => row.userId))]);
 }

@@ -1,5 +1,32 @@
+import { Ratelimit } from "@upstash/ratelimit";
 import { sql } from "drizzle-orm";
 import { db } from "@/db";
+import { logError, logWarn } from "@/lib/log";
+import { redis } from "@/lib/redis";
+
+const limiters = new Map<string, Ratelimit>();
+
+function redisLimiter(max: number, windowSeconds: number) {
+  if (!redis) return null;
+
+  const id = `${max}:${windowSeconds}`;
+  const existing = limiters.get(id);
+  if (existing) return existing;
+
+  const limiter = new Ratelimit({
+    redis,
+    // Preserve the established fixed-window behavior while moving the atomic counter
+    // off Postgres. The algorithm is one Redis script, not a read followed by a write.
+    limiter: Ratelimit.fixedWindow(max, `${windowSeconds} s`),
+    prefix: `circle:${process.env.VERCEL_ENV ?? "dev"}:ratelimit:${id}`,
+    analytics: false,
+    // Do not hold a content mutation for Upstash's five-second default during an
+    // outage. A timeout drops into the durable Postgres fallback below.
+    timeout: 1_000,
+  });
+  limiters.set(id, limiter);
+  return limiter;
+}
 
 /**
  * Fixed-window rate limiting, one atomic statement.
@@ -17,7 +44,7 @@ import { db } from "@/db";
  * Key on the user id, never the IP: every caller here is authenticated, and behind
  * Vercel the IP is a proxy's anyway.
  */
-export async function allow(key: string, max: number, windowSeconds: number) {
+async function allowWithPostgres(key: string, max: number, windowSeconds: number) {
   const { rows } = await db.execute<{ count: number }>(sql`
     INSERT INTO rate_limits (key, count, reset_at)
     VALUES (${key}, 1, now() + make_interval(secs => ${windowSeconds}))
@@ -45,4 +72,29 @@ export async function allow(key: string, max: number, windowSeconds: number) {
   }
 
   return Number(rows[0]?.count ?? 0) <= max;
+}
+
+/**
+ * Shared application limiter.
+ *
+ * Production uses Upstash so these high-frequency counters do not consume a database
+ * connection or add writes to the primary data store. Local development has no Redis
+ * requirement, and a configured Redis outage must not disable abuse protection, so the
+ * original atomic Postgres statement remains the fallback in both cases.
+ */
+export async function allow(key: string, max: number, windowSeconds: number) {
+  const limiter = redisLimiter(max, windowSeconds);
+  if (limiter) {
+    try {
+      const result = await limiter.limit(key);
+      if (result.reason !== "timeout") return result.success;
+      logWarn("ratelimit.redis_timeout", { scope: key.split(":", 1)[0] });
+    } catch (error) {
+      logError("ratelimit.redis_failed", error, {
+        scope: key.split(":", 1)[0],
+      });
+    }
+  }
+
+  return allowWithPostgres(key, max, windowSeconds);
 }

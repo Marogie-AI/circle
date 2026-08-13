@@ -15,6 +15,7 @@ import {
   posts,
   reactions,
 } from "@/db/schema";
+import { invalidateGroupContent } from "@/lib/cache-keys";
 import { requireMember } from "@/lib/guard";
 import { safeFetchPreview } from "@/lib/link-preview";
 import { DEFAULT_POST_KIND, parsePostKind, type PostKind } from "@/lib/kind";
@@ -103,6 +104,7 @@ export async function pinPost(slug: string, postId: string) {
   if (role !== "owner") throw new Error("Only the owner can pin posts.");
   if (!(await publishedPostInGroup(postId, group.id))) notFound();
   await db.update(posts).set({ pinnedAt: new Date() }).where(eq(posts.id, postId));
+  await invalidateGroupContent(group.id);
   revalidatePath(`/groups/${slug}`);
   revalidatePath(`/groups/${slug}/p/${postId}`);
 }
@@ -112,6 +114,7 @@ export async function unpinPost(slug: string, postId: string) {
   if (role !== "owner") throw new Error("Only the owner can unpin posts.");
   if (!(await publishedPostInGroup(postId, group.id))) notFound();
   await db.update(posts).set({ pinnedAt: null }).where(eq(posts.id, postId));
+  await invalidateGroupContent(group.id);
   revalidatePath(`/groups/${slug}`);
   revalidatePath(`/groups/${slug}/p/${postId}`);
 }
@@ -160,9 +163,12 @@ export async function publishDraft(slug: string, postId: string) {
     ))
   ) {
     if (post.url) {
-      attachPreview(postId, post.url, post.title, post.tags);
+      attachPreview(group.id, postId, post.url, post.title, post.tags);
     } else {
-      after(() => attachStockCover(postId, post.title, post.tags));
+      after(async () => {
+        await attachStockCover(postId, post.title, post.tags);
+        await invalidateGroupContent(group.id);
+      });
     }
   }
 
@@ -182,6 +188,7 @@ export async function publishDraft(slug: string, postId: string) {
     );
   });
 
+  await invalidateGroupContent(group.id);
   revalidatePath(`/groups/${slug}`);
   redirect(`/groups/${slug}/p/${postId}`);
 }
@@ -299,6 +306,7 @@ function readDraftFields(formData: FormData): PostFields {
  * moment later. safeFetchPreview enforces the SSRF guards and returns null on failure.
  */
 function attachPreview(
+  groupId: string,
   postId: string,
   url: string | null,
   title: string,
@@ -320,6 +328,7 @@ function attachPreview(
 
     // The linked page had no artwork of its own — fall back to a stock cover.
     if (!preview?.image) await attachStockCover(postId, title, tags);
+    await invalidateGroupContent(groupId);
   });
 }
 
@@ -483,10 +492,13 @@ export async function createPost(
   ) {
     if (fields.url) {
       // attachPreview falls through to a stock cover if the page has no image.
-      attachPreview(newPost.id, fields.url, fields.title, fields.tags);
+      attachPreview(group.id, newPost.id, fields.url, fields.title, fields.tags);
     } else {
       // No link at all — a note. Nothing to preview, so go straight to a cover.
-      after(() => attachStockCover(newPost.id, fields.title, fields.tags));
+      after(async () => {
+        await attachStockCover(newPost.id, fields.title, fields.tags);
+        await invalidateGroupContent(group.id);
+      });
     }
   }
 
@@ -515,6 +527,7 @@ export async function createPost(
     );
   });
 
+  await invalidateGroupContent(group.id);
   revalidatePath(`/groups/${slug}`);
   redirect(`/groups/${slug}/p/${newPost.id}`);
 }
@@ -589,10 +602,16 @@ export async function updatePost(
     ))
   ) {
     if (fields.url) {
-      attachPreview(updated.id, fields.url, fields.title, fields.tags);
+      attachPreview(group.id, updated.id, fields.url, fields.title, fields.tags);
     } else {
-      after(() => attachStockCover(updated.id, fields.title, fields.tags));
+      after(async () => {
+        await attachStockCover(updated.id, fields.title, fields.tags);
+        await invalidateGroupContent(group.id);
+      });
     }
+  }
+  if (current.status !== "draft") {
+    await invalidateGroupContent(group.id);
   }
   revalidatePath(`/groups/${slug}/p/${postId}`);
   redirect(`/groups/${slug}/p/${postId}`);
@@ -616,6 +635,7 @@ export async function deletePost(slug: string, postId: string) {
   if (!deleted) notFound();
 
   // comments, reactions and saved_posts rows go with it via ON DELETE CASCADE
+  await invalidateGroupContent(group.id);
   revalidatePath(`/groups/${slug}`);
   redirect(`/groups/${slug}`);
 }
@@ -673,6 +693,7 @@ export async function deleteComment(
     .returning({ id: comments.id });
 
   if (!deleted) notFound();
+  await invalidateGroupContent(group.id);
   // No revalidatePath: the client thread removes just this node (and its subtree) in place.
   // Revalidating would refetch and re-render the whole comment tree, collapsing every
   // thread the viewer had expanded — exactly what we don't want on a single delete.
@@ -730,6 +751,7 @@ export async function addComment(
     .insert(comments)
     .values({ postId, authorId: user.id, body, parentId: parent?.id ?? null })
     .returning({ id: comments.id, createdAt: comments.createdAt });
+  await invalidateGroupContent(group.id);
   revalidatePath(`/groups/${slug}/p/${postId}`);
 
   // Notifications are best-effort, off the critical path: a database failure after the
@@ -869,6 +891,7 @@ export async function toggleReaction(
     });
   }
 
+  await invalidateGroupContent(group.id);
   revalidatePath(`/groups/${slug}/p/${postId}`);
 }
 

@@ -256,12 +256,12 @@ export const commentReactions = pgTable(
 );
 
 /**
- * Fixed-window rate limit counters.
+ * Fixed-window rate limit fallback counters.
  *
- * In Postgres rather than memory because serverless instances do not share memory — an
- * in-process Map would reset on every cold start and would be per-instance, so Vercel
- * spinning up more instances under load defeats exactly the limit you wanted. This costs
- * one extra round-trip on paths that already talk to Postgres.
+ * Production normally counts in Upstash Redis. This table keeps local development
+ * dependency-free and preserves durable, cross-instance limits during a Redis timeout or
+ * error. An in-process Map cannot fill that role: serverless instances do not share it and
+ * every cold start would erase it.
  *
  * `key` encodes scope and subject, e.g. "post:<userId>" or "mobile:<userId>".
  */

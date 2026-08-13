@@ -17,6 +17,8 @@ import {
   reactions,
   user,
 } from "@/db/schema";
+import { cached } from "@/lib/cache";
+import { keys } from "@/lib/cache-keys";
 import type { PostKind } from "@/lib/kind";
 
 export type FeedCursor = {
@@ -99,62 +101,71 @@ export async function getFeedPage({
   // measured only 0.08 ms, so this is not about CPU — it is about round-trips: three
   // sequential trips became one, which is what actually costs on a networked database.
   // Bounded by the LIMIT below, so at most safeLimit+1 index lookups per side.
-  const rows = await db
-    .select({
-      id: posts.id,
-      title: posts.title,
-      tags: posts.tags,
-      createdAt: posts.createdAt,
-      authorName: user.name,
-      ogImage: posts.ogImage,
-      url: posts.url,
-      kind: posts.kind,
-      // Truncated in SQL, not in JS: bodies run to 10k chars and a page of 30 would ship
-      // ~300KB just to render a two-line excerpt on the cards.
-      //
-      // Selected for every row even though only imageless posts in card view use it.
-      // Deliberate: 200 bytes a row is cheaper than making the query depend on the
-      // layout, which would fork this into two shapes and two cache entries.
-      excerpt: sql<string>`left(${posts.body}, 200)`.as("excerpt"),
-      coverUrl: posts.coverUrl,
-      commentCount: sql<number>`(
-        SELECT count(*)::int FROM ${comments} WHERE ${comments.postId} = ${posts.id}
-      )`.as("comment_count"),
-      reactionCount: sql<number>`(
-        SELECT count(*)::int FROM ${reactions} WHERE ${reactions.postId} = ${posts.id}
-      )`.as("reaction_count"),
-    })
-    .from(posts)
-    .innerJoin(user, eq(user.id, posts.authorId))
-    .where(
-      and(
-        eq(posts.groupId, groupId),
-        // Drafts are author-private and never surface in the feed.
-        eq(posts.status, "published"),
-        tag ? arrayContains(posts.tags, [tag]) : undefined,
-        authorId ? eq(posts.authorId, authorId) : undefined,
-        kind ? eq(posts.kind, kind) : undefined,
-        cursorPredicate,
-      ),
-    )
-    .orderBy(
-      ascending ? asc(posts.createdAt) : desc(posts.createdAt),
-      ascending ? asc(posts.id) : desc(posts.id),
-    )
-    .limit(safeLimit + 1);
+  const load = async () => {
+    const rows = await db
+      .select({
+        id: posts.id,
+        title: posts.title,
+        tags: posts.tags,
+        createdAt: posts.createdAt,
+        authorName: user.name,
+        ogImage: posts.ogImage,
+        url: posts.url,
+        kind: posts.kind,
+        // Truncated in SQL, not in JS: bodies run to 10k chars and a page of 30 would ship
+        // ~300KB just to render a two-line excerpt on the cards.
+        //
+        // Selected for every row even though only imageless posts in card view use it.
+        // Deliberate: 200 bytes a row is cheaper than making the query depend on the
+        // layout, which would fork this into two shapes and two cache entries.
+        excerpt: sql<string>`left(${posts.body}, 200)`.as("excerpt"),
+        coverUrl: posts.coverUrl,
+        commentCount: sql<number>`(
+          SELECT count(*)::int FROM ${comments} WHERE ${comments.postId} = ${posts.id}
+        )`.as("comment_count"),
+        reactionCount: sql<number>`(
+          SELECT count(*)::int FROM ${reactions} WHERE ${reactions.postId} = ${posts.id}
+        )`.as("reaction_count"),
+      })
+      .from(posts)
+      .innerJoin(user, eq(user.id, posts.authorId))
+      .where(
+        and(
+          eq(posts.groupId, groupId),
+          // Drafts are author-private and never surface in the feed.
+          eq(posts.status, "published"),
+          tag ? arrayContains(posts.tags, [tag]) : undefined,
+          authorId ? eq(posts.authorId, authorId) : undefined,
+          kind ? eq(posts.kind, kind) : undefined,
+          cursorPredicate,
+        ),
+      )
+      .orderBy(
+        ascending ? asc(posts.createdAt) : desc(posts.createdAt),
+        ascending ? asc(posts.id) : desc(posts.id),
+      )
+      .limit(safeLimit + 1);
 
-  const hasMore = rows.length > safeLimit;
-  const items = rows.slice(0, safeLimit);
-  const last = items.at(-1);
+    const hasMore = rows.length > safeLimit;
+    const items = rows.slice(0, safeLimit);
+    const last = items.at(-1);
 
-  return {
-    items,
-    hasMore,
-    nextCursor:
-      hasMore && last
-        ? encodeFeedCursor({ createdAt: last.createdAt, id: last.id })
-        : null,
+    return {
+      items,
+      hasMore,
+      nextCursor:
+        hasMore && last
+          ? encodeFeedCursor({ createdAt: last.createdAt, id: last.id })
+          : null,
+    };
   };
+
+  // Cache only the canonical first page shared by web and mobile. Filtered and cursor
+  // pages have a large key cardinality and are visited far less often, so caching them
+  // would spend more Redis commands and memory than it saves in database work.
+  return !tag && !authorId && !kind && !parsedCursor && safeLimit === 30
+    ? cached(keys.groupFeedFirst(groupId, sort), 30, load)
+    : load();
 }
 
 /**
@@ -162,42 +173,45 @@ export async function getFeedPage({
  * pagination there stays monotonic on createdAt/id. Same row shape as the feed items.
  */
 export async function getPinnedPosts(groupId: string, limit = 10) {
-  return db
-    .select({
-      id: posts.id,
-      title: posts.title,
-      tags: posts.tags,
-      createdAt: posts.createdAt,
-      authorName: user.name,
-      ogImage: posts.ogImage,
-      url: posts.url,
-      kind: posts.kind,
-      // Truncated in SQL, not in JS: bodies run to 10k chars and a page of 30 would ship
-      // ~300KB just to render a two-line excerpt on the cards.
-      //
-      // Selected for every row even though only imageless posts in card view use it.
-      // Deliberate: 200 bytes a row is cheaper than making the query depend on the
-      // layout, which would fork this into two shapes and two cache entries.
-      excerpt: sql<string>`left(${posts.body}, 200)`.as("excerpt"),
-      coverUrl: posts.coverUrl,
-      commentCount: sql<number>`(
-        SELECT count(*)::int FROM ${comments} WHERE ${comments.postId} = ${posts.id}
-      )`.as("comment_count"),
-      reactionCount: sql<number>`(
-        SELECT count(*)::int FROM ${reactions} WHERE ${reactions.postId} = ${posts.id}
-      )`.as("reaction_count"),
-    })
-    .from(posts)
-    .innerJoin(user, eq(user.id, posts.authorId))
-    .where(
-      and(
-        eq(posts.groupId, groupId),
-        eq(posts.status, "published"),
-        isNotNull(posts.pinnedAt),
-      ),
-    )
-    .orderBy(desc(posts.pinnedAt))
-    .limit(limit);
+  const load = async () =>
+    db
+      .select({
+        id: posts.id,
+        title: posts.title,
+        tags: posts.tags,
+        createdAt: posts.createdAt,
+        authorName: user.name,
+        ogImage: posts.ogImage,
+        url: posts.url,
+        kind: posts.kind,
+        // Truncated in SQL, not in JS: bodies run to 10k chars and a page of 30 would ship
+        // ~300KB just to render a two-line excerpt on the cards.
+        //
+        // Selected for every row even though only imageless posts in card view use it.
+        // Deliberate: 200 bytes a row is cheaper than making the query depend on the
+        // layout, which would fork this into two shapes and two cache entries.
+        excerpt: sql<string>`left(${posts.body}, 200)`.as("excerpt"),
+        coverUrl: posts.coverUrl,
+        commentCount: sql<number>`(
+          SELECT count(*)::int FROM ${comments} WHERE ${comments.postId} = ${posts.id}
+        )`.as("comment_count"),
+        reactionCount: sql<number>`(
+          SELECT count(*)::int FROM ${reactions} WHERE ${reactions.postId} = ${posts.id}
+        )`.as("reaction_count"),
+      })
+      .from(posts)
+      .innerJoin(user, eq(user.id, posts.authorId))
+      .where(
+        and(
+          eq(posts.groupId, groupId),
+          eq(posts.status, "published"),
+          isNotNull(posts.pinnedAt),
+        ),
+      )
+      .orderBy(desc(posts.pinnedAt))
+      .limit(limit);
+
+  return limit === 10 ? cached(keys.groupPinned(groupId), 2 * 60, load) : load();
 }
 
 /** A member's own drafts in a group — never visible to anyone else. */

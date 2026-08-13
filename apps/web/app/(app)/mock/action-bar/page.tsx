@@ -76,8 +76,8 @@ function MockBar({
     ) : null;
 
   return (
-    <div
-      className="flex items-center gap-2"
+    <fieldset
+      className="m-0 flex items-center gap-2 border-0 p-0"
       onMouseEnter={() => (hovering.current = true)}
       onMouseLeave={() => (hovering.current = false)}
     >
@@ -175,7 +175,7 @@ function MockBar({
           </div>
         ) : null}
       </div>
-    </div>
+    </fieldset>
   );
 }
 

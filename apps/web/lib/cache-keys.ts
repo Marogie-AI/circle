@@ -1,8 +1,6 @@
 import { invalidate, k } from "@/lib/cache";
 
 export const keys = {
-  membership: (slug: string, userId: string) => k("m", slug, userId),
-
   /**
    * All user-scoped chrome belongs behind one key. Splitting avatar, navigation, and
    * counters into separately cached fragments would turn every page render into several
@@ -22,8 +20,14 @@ export const invalidateGroupContent = (groupId: string) =>
     keys.groupFeedFirst(groupId, "old"),
     keys.groupTags(groupId),
     keys.groupPinned(groupId),
+    // Deleting a post cascades its collection memberships, changing these counts.
+    keys.groupCollections(groupId),
   );
 
 /** One variadic DEL clears every affected user's single chrome key. */
 export const invalidateChromeFor = (userIds: string[]) =>
   invalidate(...userIds.map(keys.userChrome));
+
+/** Membership changes affect the member picker plus each affected user's app chrome. */
+export const invalidateGroupMembership = (groupId: string, userIds: string[]) =>
+  invalidate(keys.groupMembers(groupId), ...userIds.map(keys.userChrome));

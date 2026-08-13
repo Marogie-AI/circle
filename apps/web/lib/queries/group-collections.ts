@@ -7,23 +7,27 @@ import {
   posts,
   user,
 } from "@/db/schema";
+import { cached } from "@/lib/cache";
+import { keys } from "@/lib/cache-keys";
 
 /** Shared collections in a group, with how many posts each holds. */
 export async function listGroupCollections(groupId: string) {
-  return db
-    .select({
-      id: collections.id,
-      name: collections.name,
-      count: sql<number>`count(${collectionPosts.postId})::int`,
-    })
-    .from(collections)
-    .leftJoin(
-      collectionPosts,
-      eq(collectionPosts.collectionId, collections.id),
-    )
-    .where(eq(collections.groupId, groupId))
-    .groupBy(collections.id, collections.name, collections.createdAt)
-    .orderBy(desc(collections.createdAt));
+  return cached(keys.groupCollections(groupId), 2 * 60, async () =>
+    db
+      .select({
+        id: collections.id,
+        name: collections.name,
+        count: sql<number>`count(${collectionPosts.postId})::int`,
+      })
+      .from(collections)
+      .leftJoin(
+        collectionPosts,
+        eq(collectionPosts.collectionId, collections.id),
+      )
+      .where(eq(collections.groupId, groupId))
+      .groupBy(collections.id, collections.name, collections.createdAt)
+      .orderBy(desc(collections.createdAt)),
+  );
 }
 
 /** A single shared collection, scoped to its group (returns undefined if it isn't in it). */
