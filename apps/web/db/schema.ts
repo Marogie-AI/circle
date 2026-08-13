@@ -164,8 +164,9 @@ export const comments = pgTable(
       .notNull()
       .references(() => user.id),
     body: text("body").notNull(),
-    // One level deep: replies always point at a top-level comment (the action
-    // coerces reply-to-reply to the parent). Cascade: replies die with parent.
+    // Arbitrary-depth tree: parentId points at the exact comment being replied
+    // to, with no coercion (see addComment). Null for a root comment. Cascade:
+    // replies die with their parent.
     parentId: uuid("parent_id").references((): AnyPgColumn => comments.id, {
       onDelete: "cascade",
     }),
