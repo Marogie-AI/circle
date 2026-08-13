@@ -60,7 +60,7 @@ export function AddToCollection({
         <div
           role="menu"
           aria-label="Add to collection"
-          className="absolute right-0 top-[calc(100%+0.5rem)] z-20 w-56 overflow-hidden rounded-xl border border-line bg-elevated p-1.5 shadow-lg"
+          className="absolute right-0 top-[calc(100%+0.5rem)] z-20 w-56 origin-top-right animate-menu-in overflow-hidden rounded-xl border border-line bg-elevated/95 p-1.5 shadow-lg backdrop-blur-sm motion-reduce:animate-none"
         >
           <p className="px-2.5 pb-1 pt-1 text-xs font-medium text-faint">Add to collection</p>
           {collections.map((collection) => (
