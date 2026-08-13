@@ -31,8 +31,28 @@ export function SubmitButton({
       aria-busy={pending}
       className={`${className} disabled:cursor-not-allowed disabled:opacity-60`}
     >
-      {pending ? null : icon}
-      {pending ? pendingLabel : children}
+      {/* Both labels always occupy the same grid cell, so the button is sized to the
+          wider of the two from the start — swapping them cross-fades instead of
+          reflowing the whole action bar mid-request. */}
+      <span className="grid place-items-center">
+        <span
+          aria-hidden={pending}
+          className={`col-start-1 row-start-1 inline-flex items-center justify-center gap-1.5 transition-opacity duration-200 ${
+            pending ? "opacity-0" : "opacity-100"
+          }`}
+        >
+          {icon}
+          {children}
+        </span>
+        <span
+          aria-hidden={!pending}
+          className={`col-start-1 row-start-1 transition-opacity duration-200 ${
+            pending ? "opacity-100" : "opacity-0"
+          }`}
+        >
+          {pendingLabel}
+        </span>
+      </span>
     </button>
   );
 }
