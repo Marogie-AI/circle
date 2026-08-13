@@ -53,12 +53,51 @@ export default async function GroupPage({ params, searchParams }: GroupPageProps
   // Unknown kinds become "no filter" rather than an error — same posture as the sort.
   const kind = parsePostKind(first(query.kind));
   const view = parseFeedView(first(query.view));
+  // Pinned strip shows only on the plain top-level view — never mid-filter or paginated,
+  // where it would be confusing to see posts that ignore the active filter.
+  const isPlainTopLevel = !q && !tag && !kind && !before;
+  const showPinned = isPlainTopLevel && !requestedAuthor;
 
-  const [lastSeen, members, tagFacets] = await Promise.all([
-    getLastSeen(group.id, user.id),
-    listGroupMembers(group.id),
-    listTagFacets(group.id),
-  ]);
+  const membersPromise = listGroupMembers(group.id);
+  const authorPromise = requestedAuthor
+    ? membersPromise.then(
+        (members) =>
+          members.find((member) => member.id === requestedAuthor) ?? null,
+      )
+    : Promise.resolve(null);
+  const searchHitsPromise = q
+    ? searchGroupPosts({ groupId: group.id, query: q })
+    : Promise.resolve(null);
+  const feedPromise = q
+    ? Promise.resolve(null)
+    : authorPromise.then((author) =>
+        getFeedPage({
+          groupId: group.id,
+          tag,
+          authorId: author?.id ?? null,
+          kind,
+          sort,
+          cursor: before,
+        }),
+      );
+  const pinnedPromise = showPinned
+    ? getPinnedPosts(group.id)
+    : isPlainTopLevel
+      ? authorPromise.then((author) =>
+          author ? Promise.resolve([]) : getPinnedPosts(group.id),
+        )
+      : Promise.resolve([]);
+
+  const [lastSeen, members, tagFacets, searchHits, feed, pinned, collections] =
+    await Promise.all([
+      getLastSeen(group.id, user.id),
+      membersPromise,
+      listTagFacets(group.id),
+      searchHitsPromise,
+      feedPromise,
+      pinnedPromise,
+      listGroupCollections(group.id),
+    ]);
 
   // An author id from the URL is only honoured if it belongs to this group. Otherwise a
   // crafted ?author= would be a (harmless, but pointless) probe against other users.
@@ -66,18 +105,6 @@ export default async function GroupPage({ params, searchParams }: GroupPageProps
 
   // Searching replaces the feed; the two never combine, so the empty states can be
   // specific about which one you're looking at.
-  const searchHits = q ? await searchGroupPosts({ groupId: group.id, query: q }) : null;
-  const feed = q
-    ? null
-    : await getFeedPage({
-        groupId: group.id,
-        tag,
-        authorId: author?.id ?? null,
-        kind,
-        sort,
-        cursor: before,
-      });
-
   const rows = q
     ? (searchHits ?? []).map((hit) => ({
         id: hit.id,
@@ -93,12 +120,6 @@ export default async function GroupPage({ params, searchParams }: GroupPageProps
         excerpt: hit.excerpt ?? null,
       }))
     : (feed?.items ?? []);
-
-  // Pinned strip shows only on the plain top-level view — never mid-filter or paginated,
-  // where it would be confusing to see posts that ignore the active filter.
-  const showPinned = !q && !tag && !author && !kind && !before;
-  const pinned = showPinned ? await getPinnedPosts(group.id) : [];
-  const collections = await listGroupCollections(group.id);
 
   const savedIds = await savedIdsFor(user.id, rows.map((r) => r.id));
 
