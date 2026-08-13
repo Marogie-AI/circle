@@ -6,7 +6,17 @@
  * is a variable swap — and no component can end up half-converted.
  */
 @theme {
-  --color-canvas: oklch(0.945 0 0);   /* page background — light gray so white cards pop */
+  /* Page background. Faintly warm rather than neutral grey: the card grid leaves a lot
+     of it showing, and a dead-neutral field behind that many white cards read clinical.
+     This is the only chroma in the palette and it is deliberately tiny (0.006) — enough
+     to feel like paper, not enough to look tinted.
+
+     The page itself paints a GRADIENT built from this hue (see `body` below); this flat
+     value is what the smaller bg-canvas surfaces use — the draft banner, table headers,
+     disabled inputs — so they sit in the same family as the page behind them.
+
+     Slightly lighter than the old 0.945, so text contrast against it only improves. */
+  --color-canvas: oklch(0.952 0.006 80);
   --color-rail: oklch(0.97 0 0);      /* sidebar gutter */
   --color-surface: oklch(1 0 0);      /* cards, inputs */
   --color-elevated: oklch(1 0 0);     /* menus, popovers */
@@ -24,8 +34,9 @@
 }
 
 .dark {
-  /* Near-black neutral (chroma 0): reads as black, not blue-grey. */
-  --color-canvas: oklch(0.09 0 0);
+  /* Near-black, carrying the same faint warmth as light mode so the two themes are the
+     same product. Still reads as black, not blue-grey. */
+  --color-canvas: oklch(0.10 0.004 80);
   --color-rail: oklch(0.205 0 0); /* lighter than canvas so the sidebar pops */
   --color-surface: oklch(0.14 0 0);
   --color-elevated: oklch(0.17 0 0);
@@ -37,6 +48,33 @@
   --color-hover: oklch(0.2 0 0);
   --color-inverse: oklch(0.96 0 0);
   --color-inverse-ink: oklch(0.205 0 0);
+}
+
+/*
+ * The page background is a gradient, so it cannot live in a colour token — tokens are
+ * single values. It is painted here instead, warm at the top easing to neutral at the
+ * bottom, which gives the feed some depth without the flat field the card grid exposed.
+ *
+ * background-attachment: fixed anchors it to the VIEWPORT rather than the document. The
+ * app shell is a fixed-height flex layout that scrolls internally, so a document-height
+ * gradient would either be clipped to one screen or stretch to an unpredictable length;
+ * pinning it to the viewport makes it identical on a short page and a long feed.
+ */
+body {
+  background-image: linear-gradient(
+    to bottom,
+    oklch(0.965 0.012 80),
+    oklch(0.94 0 0)
+  );
+  background-attachment: fixed;
+}
+
+.dark body {
+  background-image: linear-gradient(
+    to bottom,
+    oklch(0.12 0.008 80),
+    oklch(0.08 0 0)
+  );
 }
 
 html {
