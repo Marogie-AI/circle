@@ -31,3 +31,18 @@ export const invalidateChromeFor = (userIds: string[]) =>
 /** Membership changes affect the member picker plus each affected user's app chrome. */
 export const invalidateGroupMembership = (groupId: string, userIds: string[]) =>
   invalidate(keys.groupMembers(groupId), ...userIds.map(keys.userChrome));
+
+/**
+ * A display name is copied into member pickers and the cached post byline projections.
+ * Evict every affected group in one DEL so a rename cannot linger until several TTLs
+ * expire, without also dropping unrelated tag or collection entries.
+ */
+export const invalidateDisplayNameForGroups = (groupIds: string[]) =>
+  invalidate(
+    ...groupIds.flatMap((groupId) => [
+      keys.groupMembers(groupId),
+      keys.groupFeedFirst(groupId, "new"),
+      keys.groupFeedFirst(groupId, "old"),
+      keys.groupPinned(groupId),
+    ]),
+  );

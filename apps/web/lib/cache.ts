@@ -1,4 +1,5 @@
 import superjson from "superjson";
+import { after } from "next/server";
 import { logError } from "@/lib/log";
 import { redis } from "@/lib/redis";
 
@@ -26,18 +27,27 @@ export function k(...parts: (string | number)[]) {
  * cache cannot represent is still a perfectly valid database result.
  */
 function writeInBackground(key: string, ttlSeconds: number, value: unknown) {
-  if (!redis) return;
+  const client = redis;
+  if (!client) return;
 
+  let serialized: string;
   try {
-    const write = redis.set(key, superjson.stringify(value), {
-      ex: jitteredTtl(ttlSeconds),
-    });
-    void write.catch((error) => {
-      logError("cache.set_failed", error, { key });
-    });
+    serialized = superjson.stringify(value);
   } catch (error) {
     logError("cache.set_failed", error, { key });
+    return;
   }
+
+  // An untracked promise may be frozen as soon as a serverless response finishes.
+  // after() registers the write with Next's waitUntil-backed lifecycle while still
+  // keeping it off the latency path of the request that paid for the database miss.
+  after(async () => {
+    try {
+      await client.set(key, serialized, { ex: jitteredTtl(ttlSeconds) });
+    } catch (error) {
+      logError("cache.set_failed", error, { key });
+    }
+  });
 }
 
 /**
@@ -85,11 +95,14 @@ export async function cached<T>(
  */
 export async function cachedMany(entries: CacheEntry[]): Promise<unknown[]> {
   if (entries.length === 0) return [];
-  if (!redis) return Promise.all(entries.map((entry) => entry.fn()));
+  const client = redis;
+  if (!client) return Promise.all(entries.map((entry) => entry.fn()));
 
   let cachedValues: (string | null)[];
   try {
-    cachedValues = await redis.mget<(string | null)[]>(...entries.map((entry) => entry.key));
+    cachedValues = await client.mget<(string | null)[]>(
+      ...entries.map((entry) => entry.key),
+    );
   } catch (error) {
     logError("cache.mget_failed", error, { keyCount: entries.length });
     return Promise.all(entries.map((entry) => entry.fn()));
@@ -132,12 +145,16 @@ export async function cachedMany(entries: CacheEntry[]): Promise<unknown[]> {
         ttl: entries[index].ttl,
         value: superjson.stringify(values[index]),
       }));
-      const pipeline = redis.pipeline();
-      for (const write of writes) {
-        pipeline.set(write.key, write.value, { ex: jitteredTtl(write.ttl) });
-      }
-      void pipeline.exec().catch((error) => {
-        logError("cache.pipeline_failed", error, { keyCount: writes.length });
+      after(async () => {
+        try {
+          const pipeline = client.pipeline();
+          for (const write of writes) {
+            pipeline.set(write.key, write.value, { ex: jitteredTtl(write.ttl) });
+          }
+          await pipeline.exec();
+        } catch (error) {
+          logError("cache.pipeline_failed", error, { keyCount: writes.length });
+        }
       });
     } catch (error) {
       logError("cache.pipeline_failed", error, { keyCount: missIndexes.size });
