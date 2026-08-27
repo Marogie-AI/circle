@@ -71,7 +71,7 @@ export function ReplyComposer({
         maxLength={5000}
         rows={2}
         placeholder="Reply… use @ to mention"
-        className="w-full resize-y rounded-xl border border-line bg-surface px-3 py-2.5 text-sm leading-6 outline-none transition placeholder:text-faint focus:border-inverse focus:ring-2 focus:ring-inverse/10"
+        className="w-full resize-y rounded-lg border border-line bg-surface px-3 py-2 text-sm leading-6 outline-none transition placeholder:text-faint focus:border-inverse focus:ring-1 focus:ring-inverse/10"
       />
       <div className="mt-2 flex justify-end gap-2">
         <button

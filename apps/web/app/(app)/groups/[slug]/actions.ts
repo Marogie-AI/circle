@@ -16,7 +16,7 @@ import {
   reactions,
 } from "@/db/schema";
 import { invalidateGroupContent } from "@/lib/cache-keys";
-import { requireMember } from "@/lib/guard";
+import { requireMember, requireOwner } from "@/lib/guard";
 import { safeFetchPreview } from "@/lib/link-preview";
 import { DEFAULT_POST_KIND, parsePostKind, type PostKind } from "@/lib/kind";
 import { extractMentionIds } from "@/lib/mentions";
@@ -66,10 +66,7 @@ function normalizeTags(value: string) {
 }
 
 export async function updateGroupDetails(slug: string, formData: FormData) {
-  const { group, role } = await requireMember(slug);
-  if (role !== "owner") {
-    throw new Error("Only the owner can edit group details.");
-  }
+  const { group } = await requireOwner(slug, "Only the owner can edit group details.");
 
   const description =
     String(formData.get("description") ?? "").trim().slice(0, 280) || null;
@@ -100,8 +97,7 @@ export async function updateGroupDetails(slug: string, formData: FormData) {
 }
 
 export async function pinPost(slug: string, postId: string) {
-  const { group, role } = await requireMember(slug);
-  if (role !== "owner") throw new Error("Only the owner can pin posts.");
+  const { group } = await requireOwner(slug, "Only the owner can pin posts.");
   if (!(await publishedPostInGroup(postId, group.id))) notFound();
   await db.update(posts).set({ pinnedAt: new Date() }).where(eq(posts.id, postId));
   await invalidateGroupContent(group.id);
@@ -110,8 +106,7 @@ export async function pinPost(slug: string, postId: string) {
 }
 
 export async function unpinPost(slug: string, postId: string) {
-  const { group, role } = await requireMember(slug);
-  if (role !== "owner") throw new Error("Only the owner can unpin posts.");
+  const { group } = await requireOwner(slug, "Only the owner can unpin posts.");
   if (!(await publishedPostInGroup(postId, group.id))) notFound();
   await db.update(posts).set({ pinnedAt: null }).where(eq(posts.id, postId));
   await invalidateGroupContent(group.id);
@@ -377,8 +372,7 @@ function authorOrOwnerOfPublishedPost(role: string, userId: string) {
 }
 
 export async function createInvite(slug: string) {
-  const { group, user, role } = await requireMember(slug);
-  if (role !== "owner") throw new Error("Only the owner can invite people.");
+  const { group, user } = await requireOwner(slug, "Only the owner can invite people.");
   const now = new Date();
 
   if (
@@ -430,8 +424,7 @@ export async function createInvite(slug: string) {
 }
 
 export async function revokeInvite(slug: string, token: string) {
-  const { group, role } = await requireMember(slug);
-  if (role !== "owner") throw new Error("Only the owner can revoke invites.");
+  const { group } = await requireOwner(slug, "Only the owner can revoke invites.");
 
   await db
     .update(invites)

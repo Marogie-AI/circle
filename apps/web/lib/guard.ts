@@ -26,6 +26,19 @@ export const requireMember = cache(async (slug: string) => {
   };
 });
 
+/**
+ * The single owner gate. Every owner-only mutation routes through here, so adding one
+ * cannot mean re-deriving the rule from `role` and getting the comparison subtly wrong.
+ * `message` stays per-caller because it reaches the user; the check does not.
+ */
+export async function requireOwner(slug: string, message: string) {
+  const membership = await requireMember(slug);
+  if (membership.role !== "owner") {
+    throw new Error(message);
+  }
+  return membership;
+}
+
 export const requireSession = cache(async () => {
   const session = await auth.api.getSession({ headers: await headers() });
 

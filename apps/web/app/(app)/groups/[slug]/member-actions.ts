@@ -5,7 +5,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { db } from "@/db";
 import { groups, memberships } from "@/db/schema";
-import { requireMember } from "@/lib/guard";
+import { requireOwner } from "@/lib/guard";
 import {
   invalidateGroupContent,
   invalidateGroupMembership,
@@ -20,13 +20,8 @@ type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
  * caller is an owner of the group the slug resolves to.
  */
 
-async function requireOwner(slug: string) {
-  const { group, role } = await requireMember(slug);
-  if (role !== "owner") {
-    throw new Error("Only an owner can manage members.");
-  }
-  return group;
-}
+const ownedGroup = async (slug: string) =>
+  (await requireOwner(slug, "Only an owner can manage members.")).group;
 
 /**
  * Lock this group's owner rows FOR UPDATE and reject if `userId` is the last one. Because
@@ -51,7 +46,7 @@ export async function setMemberRole(
   userId: string,
   role: "owner" | "member",
 ) {
-  const group = await requireOwner(slug);
+  const group = await ownedGroup(slug);
 
   await db.transaction(async (tx) => {
     if (role === "member") {
@@ -70,7 +65,7 @@ export async function setMemberRole(
 }
 
 export async function removeMember(slug: string, userId: string) {
-  const group = await requireOwner(slug);
+  const group = await ownedGroup(slug);
 
   await db.transaction(async (tx) => {
     await assertNotLastOwner(tx, group.id, userId);
@@ -86,7 +81,7 @@ export async function removeMember(slug: string, userId: string) {
 }
 
 export async function deleteGroup(slug: string) {
-  const group = await requireOwner(slug);
+  const group = await ownedGroup(slug);
 
   const memberRows = await db
     .select({ userId: memberships.userId })

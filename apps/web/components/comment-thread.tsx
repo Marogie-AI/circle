@@ -168,7 +168,7 @@ export function CommentThread({
           <MentionText
             text={comment.body}
             members={members}
-            className="mt-1 whitespace-pre-wrap break-words text-sm leading-6 text-ink"
+            className="mt-0.5 whitespace-pre-wrap wrap-break-word text-sm leading-6 text-ink"
           />
 
           <div className="mt-1 flex items-center gap-3 text-xs font-medium text-faint">

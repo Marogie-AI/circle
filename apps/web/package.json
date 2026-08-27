@@ -10,12 +10,13 @@
     "build": "next build",
     "start": "next start",
     "lint": "biome lint .",
-    "test": "bun test --env-file=.env.local lib/",
+    "test": "bun test --env-file=.env.local lib/ app/",
     "test:smoke-api": "bun scripts/smoke-api.ts",
     "typecheck": "tsc --noEmit",
     "db:check": "bun --env-file=.env.local drizzle-kit check",
     "db:generate": "bun --env-file=.env.local drizzle-kit generate",
     "db:migrate": "bun --env-file=.env.local drizzle-kit migrate",
+    "db:seed": "bun --env-file=.env.local scripts/seed.ts",
     "db:verify": "bun scripts/verify-schema.ts"
   },
   "dependencies": {

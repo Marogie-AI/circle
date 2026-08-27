@@ -139,7 +139,9 @@ export function GroupNavItem({
 
       {open && !collapsed ? (
         // ml/border-l is the nesting cue: these belong to the group above them.
-        <ul id={panelId} className="ml-[1.375rem] mt-0.5 border-l border-line pl-2">
+        // pl-[3px]: 22px ml + 1px border + 3px + 10px link padding = 36px, so the
+        // category icons start exactly where the group label's first letter does.
+        <ul id={panelId} className="ml-5.5 mt-0.5 border-l border-line pl-0.75">
           {POST_KINDS.map((kind) => {
             const selected = activeKind === kind;
             return (
